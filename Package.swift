@@ -8,9 +8,18 @@ let package = Package(
         .macOS(.v14)
     ],
     products: [
-        .executable(name: "Porter", targets: ["PorterApp"])
+        .executable(name: "Porter", targets: ["PorterApp"]),
+        .executable(name: "PorterPathValidation", targets: ["PorterPathValidation"])
     ],
     targets: [
-        .executableTarget(name: "PorterApp")
+        .target(name: "PorterCore"),
+        .executableTarget(
+            name: "PorterApp",
+            dependencies: ["PorterCore"]
+        ),
+        .executableTarget(
+            name: "PorterPathValidation",
+            dependencies: ["PorterCore"]
+        )
     ]
 )
