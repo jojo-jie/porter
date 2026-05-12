@@ -6,17 +6,18 @@
     "dev": "swift run Porter",
     "build": "swift build",
     "typecheck": null,
-    "test": null,
+    "test": "swift run PorterPathValidation",
     "lint": null,
     "format": null
   },
   "dev_environment_tips": [
     "这是一个 Swift Package Manager 管理的 macOS SwiftUI 工具，入口在 `Sources/PorterApp/PorterApp.swift`。",
-    "本应用读取本机 `~/.ssh/config` 并调用系统 `/usr/bin/scp`，调试上传行为时优先使用本机 SSH 配置验证。"
+    "共享路径处理逻辑在 `Sources/PorterCore/RemotePath.swift`，可通过 `swift run PorterPathValidation` 做快速边界校验。",
+    "本应用读取本机 `~/.ssh/config` 并调用系统 `/usr/bin/ssh` 与 `/usr/bin/scp`，调试远端浏览、上传或下载行为时优先使用本机 SSH 配置验证。"
   ],
   "code_style_guidelines": [
     "遵循现有 SwiftUI 与 `@MainActor` 状态管理写法，保持 UI 状态更新在主 actor 上。",
-    "修改 SSH 配置解析、shell 转义或 AppleScript 拼接逻辑时，优先补充边界案例验证。"
+    "修改 SSH 配置解析、远端路径处理、shell 转义或 AppleScript 拼接逻辑时，优先补充边界案例验证。"
   ],
   "security_notes": [
     "不要提交真实主机名、私钥路径、用户名、远程目录或其他个人 SSH 配置。",
@@ -26,7 +27,7 @@
     "交接时说明是否运行了 `swift build`，以及未运行的验证项和原因。"
   ],
   "extra_checks": [
-    "涉及上传路径或命令构造时，检查空格、引号、波浪线、通配符和 shell 元字符场景。"
+    "涉及上传、下载、远端浏览路径或命令构造时，检查空格、引号、波浪线、通配符和 shell 元字符场景。"
   ],
   "blocked_paths": [
     ".build",
