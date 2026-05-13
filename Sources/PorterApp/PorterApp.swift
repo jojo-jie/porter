@@ -23,20 +23,53 @@ struct PorterApp: App {
         .windowResizability(.contentMinSize)
         .defaultSize(width: 1120, height: 760)
         .commands {
-            PorterSettingsCommands()
+            PorterAppCommands()
         }
     }
 }
 
-private struct PorterSettingsCommands: Commands {
+private struct PorterAppCommands: Commands {
     var body: some Commands {
+        CommandGroup(replacing: .appInfo) {
+            Button("关于 Porter") {
+                PorterAboutPanel.show()
+            }
+        }
+
         CommandGroup(replacing: .appSettings) {
-            Button("Settings...") {
+            Button("设置...") {
                 NotificationCenter.default.post(name: .porterShowSettings, object: nil)
                 NSApplication.shared.activate(ignoringOtherApps: true)
             }
             .keyboardShortcut(",", modifiers: .command)
         }
+    }
+}
+
+private enum PorterAboutPanel {
+    @MainActor
+    static func show() {
+        let info = Bundle.main.infoDictionary ?? [:]
+        let name = info.nonEmptyString(for: "CFBundleDisplayName")
+            ?? info.nonEmptyString(for: "CFBundleName")
+            ?? "Porter"
+        let version = info.nonEmptyString(for: "CFBundleShortVersionString") ?? "1.0.0"
+        let build = info.nonEmptyString(for: "CFBundleVersion") ?? "开发版"
+
+        NSApplication.shared.orderFrontStandardAboutPanel(options: [
+            .applicationName: name,
+            .applicationVersion: version,
+            .version: "构建 \(build)"
+        ])
+        NSApplication.shared.activate(ignoringOtherApps: true)
+    }
+}
+
+private extension Dictionary where Key == String, Value == Any {
+    func nonEmptyString(for key: String) -> String? {
+        guard let value = self[key] as? String else { return nil }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 }
 
