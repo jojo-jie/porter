@@ -694,7 +694,8 @@ private struct RemoteDirectoryBrowserSheet: View {
             let result = await RemoteDownloader.download(
                 host: browser.hostAlias,
                 remotePath: remotePath,
-                destinationDirectory: destination
+                destinationDirectory: destination,
+                remoteIsDirectory: entry.isDirectory
             )
             downloadingNames.remove(entry.name)
             downloadMessage = result

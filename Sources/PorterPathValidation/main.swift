@@ -21,4 +21,7 @@ expectEqual(RemotePathCodec.split("/var/www/app"), ["/", "var", "www", "app"], "
 expectEqual(RemotePathCodec.join(["~", "two words", "it's"]), "~/two words/it's", "home-relative components join")
 expectEqual(RemotePathCodec.join(["/", "var", "www", "app"]), "/var/www/app", "absolute components join")
 
+expectEqual(PorterSFTPBatch.batchQuotedPath("/tmp/a"), "\"/tmp/a\"", "sftp batch quotes plain path")
+expectEqual(PorterSFTPBatch.batchQuotedPath("/tmp/a\\\"b"), "\"/tmp/a\\\\\\\"b\"", "sftp batch escapes quotes and backslashes")
+
 print("Remote path validation passed")
