@@ -149,7 +149,7 @@ struct SettingsView: View {
     }
 
     private var settingsContent: some View {
-        ScrollView {
+        ScrollView(.vertical, showsIndicators: true) {
             VStack(alignment: .leading, spacing: 22) {
                 contentHeader
 
@@ -169,6 +169,7 @@ struct SettingsView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(Color.porterCanvas)
+        .porterOverlayScrollIndicators()
         .scrollContentBackground(.hidden)
     }
 

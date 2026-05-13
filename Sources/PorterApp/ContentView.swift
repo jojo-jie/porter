@@ -74,13 +74,22 @@ struct ContentView: View {
                     .allowsHitTesting(false)
                     .ignoresSafeArea()
 
-                    detailView
-                        .padding(.horizontal, detailHorizontalPadding(for: proxy.size.width))
-                        .padding(.top, proxy.safeAreaInsets.top + 20)
-                        .padding(.bottom, 28)
+                    ScrollView(.vertical, showsIndicators: true) {
+                        detailView
+                            .frame(
+                                maxWidth: .infinity,
+                                minHeight: detailContentMinimumHeight(for: proxy),
+                                alignment: .topLeading
+                            )
+                            .padding(.horizontal, detailHorizontalPadding(for: proxy.size.width))
+                            .padding(.top, proxy.safeAreaInsets.top + 20)
+                            .padding(.bottom, 28)
+                    }
+                    .porterOverlayScrollIndicators()
+                    .scrollContentBackground(.hidden)
                 }
             }
-            .frame(minWidth: 720, minHeight: 700)
+            .frame(minWidth: 760, minHeight: 520)
             .compositingGroup()
         }
         .navigationSplitViewStyle(.balanced)
@@ -132,7 +141,7 @@ struct ContentView: View {
             .padding(.top, 8)
             .padding(.bottom, 6)
 
-            ScrollView {
+            ScrollView(.vertical, showsIndicators: true) {
                 LazyVStack(spacing: 4) {
                     ForEach(filteredHosts) { host in
                         hostSidebarButton(for: host)
@@ -152,6 +161,7 @@ struct ContentView: View {
                     .foregroundStyle(.secondary)
                 }
             }
+            .porterOverlayScrollIndicators()
         }
         .background(Color.porterSidebar)
         .navigationSplitViewColumnWidth(min: 220, ideal: 280, max: 360)
@@ -254,6 +264,10 @@ struct ContentView: View {
         if width < 460 { return 18 }
         if width < 700 { return 28 }
         return 40
+    }
+
+    private func detailContentMinimumHeight(for proxy: GeometryProxy) -> CGFloat {
+        max(0, proxy.size.height - proxy.safeAreaInsets.top - 48)
     }
 
     @ViewBuilder

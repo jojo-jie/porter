@@ -21,7 +21,7 @@ struct PorterApp: App {
         }
         .windowStyle(.titleBar)
         .windowResizability(.contentMinSize)
-        .defaultSize(width: 1120, height: 720)
+        .defaultSize(width: 1120, height: 760)
         .commands {
             PorterSettingsCommands()
         }
