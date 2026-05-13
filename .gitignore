@@ -24,6 +24,9 @@ xcuserdata/
 # Release artifacts
 dist/
 
+# 本地递增的打包构建号（package-dmg 等脚本写入，不应提交）
+Packaging/BundleBuildNumber.txt
+
 # Editor
 .vscode/
 .idea/
