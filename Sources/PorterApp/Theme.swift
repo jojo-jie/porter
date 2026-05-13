@@ -26,6 +26,14 @@ extension Color {
             : NSColor(red: 0.951, green: 0.945, blue: 0.921, alpha: 1)
     })
 
+    /// 侧栏行 hover / selected 背景，贴近系统设置侧栏的柔和灰色反馈。
+    static let porterSidebarRowHighlight = Color(nsColor: NSColor(name: nil) { appearance in
+        let isDark = appearance.bestMatch(from: [.darkAqua, .vibrantDark]) != nil
+        return isDark
+            ? NSColor(white: 1.0, alpha: 0.11)
+            : NSColor(white: 0.0, alpha: 0.055)
+    })
+
     /// 1pt 发丝线，永远不喧宾夺主。
     static let porterBorder = Color(nsColor: NSColor(name: nil) { appearance in
         let isDark = appearance.bestMatch(from: [.darkAqua, .vibrantDark]) != nil

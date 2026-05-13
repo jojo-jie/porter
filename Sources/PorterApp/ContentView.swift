@@ -3,14 +3,56 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct ContentView: View {
+    @EnvironmentObject private var appearanceSettings: AppearanceSettingsStore
     @StateObject private var model = AppModel()
     @State private var isFileImporterPresented = false
     @State private var isDropTargeted = false
     @State private var isRemoteBrowserPresented = false
+    @State private var isSettingsPresented = false
     @State private var sidebarSearchText = ""
+    @State private var hoveredHostID: SSHHost.ID?
     @State private var refreshSpin = 0
 
     var body: some View {
+        ZStack {
+            if isSettingsPresented {
+                SettingsView {
+                    isSettingsPresented = false
+                }
+                .environmentObject(appearanceSettings)
+                .transition(.opacity)
+            } else {
+                workspaceView
+                    .transition(.opacity)
+            }
+        }
+        .tint(.porterAccent)
+        .toolbarBackground(Color.porterCanvas, for: .windowToolbar)
+        .toolbarBackground(.visible, for: .windowToolbar)
+        .fileImporter(
+            isPresented: $isFileImporterPresented,
+            allowedContentTypes: [.item],
+            allowsMultipleSelection: true
+        ) { result in
+            if case .success(let urls) = result {
+                model.upload(urls: urls)
+            }
+        }
+        .animation(.easeOut(duration: 0.16), value: isRemoteBrowserPresented)
+        .animation(.easeOut(duration: 0.16), value: isSettingsPresented)
+        .onReceive(NotificationCenter.default.publisher(for: .porterShowSettings)) { _ in
+            isRemoteBrowserPresented = false
+            isSettingsPresented = true
+        }
+        .onChange(of: sidebarSearchText) { _, _ in
+            syncSelectedHostWithFilteredHosts()
+        }
+        .onChange(of: model.hosts) { _, _ in
+            syncSelectedHostWithFilteredHosts()
+        }
+    }
+
+    private var workspaceView: some View {
         NavigationSplitView {
             sidebarView
         } detail: {
@@ -42,30 +84,11 @@ struct ContentView: View {
             .compositingGroup()
         }
         .navigationSplitViewStyle(.balanced)
-        .tint(.porterAccent)
-        .toolbarBackground(Color.porterCanvas, for: .windowToolbar)
-        .toolbarBackground(.visible, for: .windowToolbar)
-        .fileImporter(
-            isPresented: $isFileImporterPresented,
-            allowedContentTypes: [.item],
-            allowsMultipleSelection: true
-        ) { result in
-            if case .success(let urls) = result {
-                model.upload(urls: urls)
-            }
-        }
         .overlay {
             if isRemoteBrowserPresented {
                 remoteBrowserOverlay
                     .transition(.opacity)
             }
-        }
-        .animation(.easeOut(duration: 0.16), value: isRemoteBrowserPresented)
-        .onChange(of: sidebarSearchText) { _, _ in
-            syncSelectedHostWithFilteredHosts()
-        }
-        .onChange(of: model.hosts) { _, _ in
-            syncSelectedHostWithFilteredHosts()
         }
     }
 
@@ -109,14 +132,16 @@ struct ContentView: View {
             .padding(.top, 8)
             .padding(.bottom, 6)
 
-            List(filteredHosts, selection: $model.selectedHostID) { host in
-                HostSidebarRow(host: host)
-                    .tag(host.id)
-                    .listRowBackground(Color.clear)
+            ScrollView {
+                LazyVStack(spacing: 4) {
+                    ForEach(filteredHosts) { host in
+                        hostSidebarButton(for: host)
+                    }
+                }
+                .padding(.horizontal, 10)
+                .padding(.top, 4)
+                .padding(.bottom, 10)
             }
-            .listStyle(.sidebar)
-            .scrollContentBackground(.hidden)
-            .compositingGroup()
             .overlay {
                 if filteredHosts.isEmpty {
                     ContentUnavailableView(
@@ -131,6 +156,28 @@ struct ContentView: View {
         .background(Color.porterSidebar)
         .navigationSplitViewColumnWidth(min: 220, ideal: 280, max: 360)
         .navigationTitle("Porter")
+    }
+
+    private func hostSidebarButton(for host: SSHHost) -> some View {
+        let isHighlighted = model.selectedHostID == host.id || hoveredHostID == host.id
+
+        return Button {
+            model.selectedHostID = host.id
+        } label: {
+            HostSidebarRow(host: host)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(isHighlighted ? Color.porterSidebarRowHighlight : Color.clear)
+                )
+                .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovering in
+            hoveredHostID = isHovering ? host.id : nil
+        }
     }
 
     private var refreshHostsButton: some View {
