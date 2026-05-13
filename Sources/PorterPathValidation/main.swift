@@ -14,6 +14,12 @@ expectEqual(RemoteShellPath.changeDirectoryCommand(for: "/var/www/app"), #"cd '/
 expectEqual(RemoteShellPath.changeDirectoryCommand(for: "relative path/it's"), #"cd 'relative path/it'"'"'s'"#, "relative path escapes quotes")
 expectEqual(RemoteShellPath.changeDirectoryCommand(for: "-dash"), #"cd ./'-dash'"#, "dash-prefixed relative path is not treated as an option")
 
+expectEqual(
+    RemoteShellPath.moveItemShellCommand(from: "/tmp/a b", to: "/tmp/c'd"),
+    #"mv -- '/tmp/a b' '/tmp/c'"'"'d'"#,
+    "move command quotes paths and uses --"
+)
+
 expectEqual(RemotePathCodec.split(""), ["~"], "empty input splits to home")
 expectEqual(RemotePathCodec.split("~"), ["~"], "tilde splits to home")
 expectEqual(RemotePathCodec.split("~/uploads"), ["~", "uploads"], "home-relative input splits into components")

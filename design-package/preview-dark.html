@@ -1,0 +1,334 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Porter Design Preview · Dark</title>
+  <style>
+    :root {
+      --bg: #1e1e1e;
+      --surface: #282828;
+      --sidebar: #191919;
+      --text: #f1ece5;
+      --muted: #b8b0a6;
+      --tertiary: #817a72;
+      --accent: #d47d60;
+      --accent-soft: rgba(212, 125, 96, 0.16);
+      --border: rgba(255, 255, 255, 0.10);
+      --highlight: rgba(255, 255, 255, 0.11);
+      --shadow: 0 14px 24px rgba(0, 0, 0, 0.34);
+      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      --system: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Arial, sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--system);
+      line-height: 1.45;
+    }
+
+    .app {
+      min-height: 100vh;
+      display: grid;
+      grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+    }
+
+    aside {
+      background: var(--sidebar);
+      border-right: 1px solid var(--border);
+      padding: 14px 12px;
+    }
+
+    main {
+      position: relative;
+      padding: 28px 40px 42px;
+      overflow: hidden;
+    }
+
+    main::before {
+      content: "";
+      position: absolute;
+      inset: 0 auto 0 0;
+      width: 20px;
+      background: linear-gradient(90deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.012), transparent);
+      pointer-events: none;
+    }
+
+    [data-preview-block] { position: relative; z-index: 1; }
+    .nav-title { font-size: 15px; font-weight: 650; margin-bottom: 12px; }
+    .search, .field {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      width: 100%;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: rgba(40, 40, 40, 0.85);
+      padding: 8px 10px;
+      color: var(--muted);
+    }
+
+    .host-list { display: grid; gap: 4px; margin-top: 14px; }
+    .host-row {
+      padding: 9px 10px;
+      border-radius: 10px;
+    }
+    .host-row.active { background: var(--highlight); }
+    .host-name { font-size: 15px; font-weight: 560; }
+    .host-subtitle { font: 12px var(--mono); color: var(--muted); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+    .hero {
+      display: grid;
+      gap: 22px;
+      max-width: 980px;
+    }
+
+    .eyebrow {
+      display: inline-flex;
+      width: fit-content;
+      align-items: center;
+      border-radius: 999px;
+      background: var(--accent-soft);
+      color: var(--accent);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: .08em;
+      padding: 4px 9px;
+    }
+
+    h1 { font-size: clamp(32px, 5vw, 48px); line-height: 1.05; margin: 0; letter-spacing: -0.035em; }
+    h2 { font-size: 22px; margin: 0 0 14px; letter-spacing: -0.015em; }
+    p { margin: 0; color: var(--muted); }
+    .meta-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 0;
+      border-top: 1px solid var(--border);
+      border-bottom: 1px solid var(--border);
+      margin: 6px 0 2px;
+    }
+    .meta { padding: 14px 20px 14px 0; }
+    .meta + .meta { border-left: 1px solid var(--border); padding-left: 20px; }
+    .label { color: var(--tertiary); font-size: 11px; font-weight: 650; letter-spacing: .06em; }
+    .mono { font-family: var(--mono); }
+
+    .section-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 18px;
+      margin-top: 28px;
+      max-width: 1060px;
+    }
+    .card {
+      background: rgba(40, 40, 40, 0.92);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 20px 22px;
+    }
+    .wide { grid-column: 1 / -1; }
+
+    .swatches { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
+    .swatch { border: 1px solid var(--border); border-radius: 12px; overflow: hidden; background: var(--surface); }
+    .chip { height: 54px; }
+    .swatch-info { padding: 10px; font-size: 12px; }
+    .swatch-info strong { display: block; }
+    .swatch-info code { color: var(--muted); font-family: var(--mono); }
+
+    .type-sample { display: grid; gap: 12px; }
+    .display { font-size: 34px; font-weight: 650; letter-spacing: -0.03em; }
+    .body-text { font-size: 15px; color: var(--muted); }
+    .caption { font-size: 12px; color: var(--tertiary); font-weight: 650; letter-spacing: .06em; }
+
+    .button-row { display: flex; gap: 10px; flex-wrap: wrap; }
+    button, .button {
+      border: 1px solid var(--border);
+      border-radius: 9px;
+      background: var(--surface);
+      color: var(--text);
+      padding: 9px 13px;
+      font: 600 14px var(--system);
+      text-decoration: none;
+    }
+    .primary { background: var(--accent); border-color: var(--accent); color: #1f1713; }
+    .ghost { background: transparent; color: var(--muted); }
+    .disabled { opacity: .45; }
+
+    .dropzone {
+      display: grid;
+      place-items: center;
+      min-height: 220px;
+      border: 1.5px solid rgba(212, 125, 96, 0.65);
+      border-radius: 16px;
+      background: rgba(212, 125, 96, 0.08);
+      text-align: center;
+      padding: 28px;
+    }
+    .drop-icon {
+      width: 64px;
+      height: 64px;
+      display: grid;
+      place-items: center;
+      border-radius: 50%;
+      background: rgba(212, 125, 96, 0.16);
+      color: var(--accent);
+      font-size: 28px;
+      margin: 0 auto 14px;
+    }
+
+    .control-stack { display: grid; gap: 10px; }
+    .focus { border-color: rgba(212, 125, 96, 0.55); box-shadow: 0 0 0 1px rgba(212, 125, 96, 0.22); }
+    .status {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      background: rgba(40, 40, 40, 0.7);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 10px 14px;
+      color: var(--muted);
+      font-family: var(--mono);
+      font-size: 13px;
+    }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: #58bd79; }
+
+    .browser {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+    .browser-head, .browser-foot { padding: 14px 16px; display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+    .browser-bar { padding: 10px 16px; background: rgba(255, 255, 255, 0.035); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+    .crumb { color: var(--accent); font-family: var(--mono); font-size: 13px; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th { color: var(--tertiary); font-size: 11px; text-align: left; padding: 8px; background: rgba(255, 255, 255, 0.04); }
+    td { padding: 9px 8px; border-top: 1px solid var(--border); }
+    td:nth-child(2), td:nth-child(3) { font-family: var(--mono); color: var(--muted); }
+
+    .rhythm { display: flex; align-items: end; gap: 12px; }
+    .r { background: var(--accent-soft); border: 1px solid rgba(212, 125, 96, .30); border-radius: 10px; color: var(--accent); display: grid; place-items: center; font: 12px var(--mono); }
+    .r1 { width: 32px; height: 32px; } .r2 { width: 48px; height: 48px; border-radius: 14px; } .r3 { width: 72px; height: 72px; border-radius: 16px; } .r4 { width: 96px; height: 96px; border-radius: 18px; }
+
+    @media (max-width: 780px) {
+      .app { grid-template-columns: 1fr; }
+      aside { border-right: 0; border-bottom: 1px solid var(--border); }
+      main { padding: 24px 18px 34px; }
+      .section-grid, .meta-grid, .swatches { grid-template-columns: 1fr; }
+      .meta + .meta { border-left: 0; border-top: 1px solid var(--border); padding-left: 0; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside data-preview-block="header">
+      <div class="nav-title">Porter</div>
+      <div class="search">⌕ 搜索主机名称</div>
+      <div class="host-list">
+        <div class="host-row active">
+          <div class="host-name">staging-box</div>
+          <div class="host-subtitle">deploy@staging.internal · 22</div>
+        </div>
+        <div class="host-row">
+          <div class="host-name">assets-node</div>
+          <div class="host-subtitle">media@10.0.0.42 · 2222</div>
+        </div>
+      </div>
+    </aside>
+
+    <main>
+      <section class="hero" data-preview-block="hero">
+        <span class="eyebrow">SSH</span>
+        <h1>深色模式仍保持温暖与安静</h1>
+        <p>暗色适配不使用纯黑，而以炭灰层次和更亮的暖橙承载长时间操作。边框、表格和状态区域保持低噪声。</p>
+        <div class="meta-grid">
+          <div class="meta"><div class="label">用户</div><div class="mono">deploy</div></div>
+          <div class="meta"><div class="label">地址</div><div class="mono">staging.internal</div></div>
+          <div class="meta"><div class="label">端口</div><div class="mono">22</div></div>
+        </div>
+      </section>
+
+      <div class="section-grid">
+        <section class="card wide" data-preview-block="colors">
+          <h2>色板与角色</h2>
+          <div class="swatches">
+            <div class="swatch"><div class="chip" style="background:#1e1e1e"></div><div class="swatch-info"><strong>Canvas</strong><code>#1E1E1E</code></div></div>
+            <div class="swatch"><div class="chip" style="background:#282828"></div><div class="swatch-info"><strong>Surface</strong><code>#282828</code></div></div>
+            <div class="swatch"><div class="chip" style="background:#191919"></div><div class="swatch-info"><strong>Sidebar</strong><code>#191919</code></div></div>
+            <div class="swatch"><div class="chip" style="background:#d47d60"></div><div class="swatch-info"><strong>Accent</strong><code>#D47D60</code></div></div>
+            <div class="swatch"><div class="chip" style="background:rgba(255,255,255,.10)"></div><div class="swatch-info"><strong>Border</strong><code>10% white</code></div></div>
+          </div>
+        </section>
+
+        <section class="card" data-preview-block="typography">
+          <h2>字体排版</h2>
+          <div class="type-sample">
+            <div class="display">远端目录</div>
+            <div class="body-text">深色模式中保持较高可读性，弱化标签与辅助说明。</div>
+            <div class="mono">~/uploads/releases/porter.dmg</div>
+            <div class="caption">技术文本保留等宽节奏</div>
+          </div>
+        </section>
+
+        <section class="card" data-preview-block="buttons">
+          <h2>按钮与行动</h2>
+          <div class="button-row">
+            <a class="button primary" href="#">选择文件上传</a>
+            <a class="button" href="#">打开终端</a>
+            <a class="button ghost" href="#">取消</a>
+            <a class="button disabled" href="#">上传中</a>
+          </div>
+        </section>
+
+        <section class="card" data-preview-block="controls">
+          <h2>输入与状态</h2>
+          <div class="control-stack">
+            <div class="field focus"><span class="mono">/var/www/app</span></div>
+            <div class="status"><span class="dot"></span><span>上传完成：porter.dmg → /var/www/app</span></div>
+          </div>
+        </section>
+
+        <section class="card" data-preview-block="cards">
+          <h2>拖拽上传区</h2>
+          <div class="dropzone">
+            <div>
+              <div class="drop-icon">⇩</div>
+              <strong>释放即可上传</strong>
+              <p>或点击下方按钮选择本地文件</p>
+            </div>
+          </div>
+        </section>
+
+        <section class="card" data-preview-block="spacing">
+          <h2>间距与圆角</h2>
+          <div class="rhythm">
+            <div class="r r1">10</div>
+            <div class="r r2">14</div>
+            <div class="r r3">16</div>
+            <div class="r r4">18</div>
+          </div>
+        </section>
+
+        <section class="card wide" data-preview-block="effects">
+          <h2>浮层、边框与目录表格</h2>
+          <div class="browser">
+            <div class="browser-head"><strong>选择远程目录</strong><span class="mono">staging-box</span></div>
+            <div class="browser-bar"><span class="crumb">/ › var › www › app</span></div>
+            <table data-preview-block="tables">
+              <thead><tr><th>名称</th><th>修改时间</th><th>大小</th><th>类型</th></tr></thead>
+              <tbody>
+                <tr><td>📁 releases</td><td>2026-05-13 22:10</td><td>—</td><td>文件夹</td></tr>
+                <tr><td>📄 porter.dmg</td><td>2026-05-13 21:48</td><td>42 MB</td><td>文件</td></tr>
+              </tbody>
+            </table>
+            <div class="browser-foot"><span class="mono">当前路径 /var/www/app</span><a class="button primary" href="#">使用此目录</a></div>
+          </div>
+        </section>
+      </div>
+    </main>
+  </div>
+</body>
+</html>

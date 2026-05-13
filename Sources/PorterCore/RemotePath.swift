@@ -17,6 +17,11 @@ public enum RemoteShellPath {
         return "cd \(remoteSingleQuoted(normalized))"
     }
 
+    /// POSIX `sh` snippet: rename/move with safely quoted full paths (`mv -- src dst`).
+    public static func moveItemShellCommand(from oldPath: String, to newPath: String) -> String {
+        "mv -- \(remoteSingleQuoted(oldPath)) \(remoteSingleQuoted(newPath))"
+    }
+
     static func remoteSingleQuoted(_ value: String) -> String {
         "'" + value.replacingOccurrences(of: "'", with: "'\"'\"'") + "'"
     }

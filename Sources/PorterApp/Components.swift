@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct HostSidebarRow: View {
@@ -165,6 +166,7 @@ struct PathField: View {
                 .tint(Color.porterAccent)
                 .help("在远端按层级浏览并选择目录（需本机对该 Host 可免交互 ssh）")
                 .accessibilityLabel("远端目录层级浏览")
+                .porterPointingHandCursor()
             }
 
             Text("可直接输入路径，或通过右侧按钮连接远端浏览；上传时路径将交给 scp，连接仍走 ~/.ssh/config。")
@@ -292,5 +294,32 @@ struct DropZone: View {
         )
         .animation(.easeOut(duration: 0.18), value: isTargeted)
         .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .porterPointingHandCursor(!isUploading)
+    }
+}
+
+extension View {
+    /// 可点击区域悬停时显示手型指针（`NSCursor.pointingHand`）。
+    func porterPointingHandCursor(_ enabled: Bool = true) -> some View {
+        modifier(PorterPointingHandCursorModifier(enabled: enabled))
+    }
+}
+
+private struct PorterPointingHandCursorModifier: ViewModifier {
+    let enabled: Bool
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if enabled {
+            content.onHover { hovering in
+                if hovering {
+                    NSCursor.pointingHand.push()
+                } else {
+                    NSCursor.pop()
+                }
+            }
+        } else {
+            content
+        }
     }
 }

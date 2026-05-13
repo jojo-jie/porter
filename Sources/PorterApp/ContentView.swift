@@ -128,6 +128,7 @@ struct ContentView: View {
                         }
                         .buttonStyle(.plain)
                         .accessibilityLabel("清空搜索")
+                        .porterPointingHandCursor()
                     }
                 }
                 .padding(.horizontal, 9)
@@ -193,6 +194,7 @@ struct ContentView: View {
         .onHover { isHovering in
             hoveredHostID = isHovering ? host.id : nil
         }
+        .porterPointingHandCursor()
     }
 
     private var refreshHostsButton: some View {
@@ -219,6 +221,7 @@ struct ContentView: View {
         .foregroundStyle(Color.porterAccent)
         .help("重新读取 ~/.ssh/config 中的 Host 列表")
         .accessibilityLabel("重新读取 SSH 配置")
+        .porterPointingHandCursor()
     }
 
     private var filteredHosts: [SSHHost] {
@@ -236,6 +239,7 @@ struct ContentView: View {
                 .onTapGesture {
                     isRemoteBrowserPresented = false
                 }
+                .porterPointingHandCursor()
 
             if let host = model.selectedHost {
                 RemoteDirectoryBrowserContainer(
@@ -348,6 +352,7 @@ struct ContentView: View {
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
             .disabled(model.isUploading)
+            .porterPointingHandCursor(!model.isUploading)
 
             Button {
                 openSSHTest(host: host.name)
@@ -358,6 +363,7 @@ struct ContentView: View {
             .buttonStyle(.bordered)
             .controlSize(.large)
             .disabled(model.isUploading)
+            .porterPointingHandCursor(!model.isUploading)
 
             if axis == .horizontal {
                 Spacer(minLength: 0)

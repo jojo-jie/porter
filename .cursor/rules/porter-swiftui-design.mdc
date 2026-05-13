@@ -1,0 +1,15 @@
+---
+description: Porter macOS SwiftUI 界面须遵循 design-package/DESIGN.md（暖色画布、单一 Accent、发丝边框与圆角节奏）。
+globs: Sources/PorterApp/**/*.swift
+alwaysApply: false
+---
+
+# Porter SwiftUI 设计规范
+
+编辑或审阅匹配文件时，落实下列设计系统（下方 `@` 引用会将全文纳入本规则上下文）。
+
+- 色板与角色以引用文件为准：Canvas / Surface / Sidebar / Accent / 文本层级 / Border；**不要让系统默认 Accent 取代 Porter 暖橙**。
+- 路径、端口、权限、日志等技术文本使用等宽字体；层次靠轻微色差与 **1px 发丝边框**，避免厚重阴影与非工具化装饰。
+- 双栏布局、间距与圆角节奏、组件尺寸、动效与禁忌均以引用全文为准；根目录 `AGENTS.md` 中 token 表仅为摘要。
+
+@design-package/DESIGN.md

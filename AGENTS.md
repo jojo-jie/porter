@@ -64,3 +64,23 @@
 - **README**：面向使用者与贡献者的产品说明；**本文**：面向自动化代理的任务约定与风险提示。
 - **单一 Swift Package**：无嵌套子包时的默认约定以根目录为准。
 - **个人数据**：文档、断言与示例中勿出现真实主机名、用户、密钥路径或个人远程路径。
+
+### UI 设计与上下文（自动化代理）
+
+- **规则注入范围**：工作区若将本文件设为「始终应用 / always applied」，只会把 **AGENTS.md 正文**注入对话上下文；`design-package/DESIGN.md` **不会**仅因文中链接而自动附带。人工在 Cursor 里做 UI 相关对话时，请用 **`@design-package/DESIGN.md`** 显式附加该文件；自动化代理在改 UI 前须用 `read_file` 读取该路径。
+- **UI 改动前的必读步骤**：在编辑、新增或审阅 **`Sources/PorterApp/**/*.swift`**（及其他 SwiftUI 表现层）前，**必须先完整阅读** [design-package/DESIGN.md](design-package/DESIGN.md)（代理侧用 `read_file` 指向 `design-package/DESIGN.md`）；布局、间距、圆角节奏、组件细则、动效与禁忌以该全文为准，不得只凭本节摘录实现。
+- **设计 token 快照（轻量摘录）**：下列色值用于在仅注入本文件时仍能对齐配色；与 `DESIGN.md` 冲突时以仓库内 `DESIGN.md` 为准。
+
+| 角色 | 浅色 | 深色 |
+| --- | --- | --- |
+| Canvas | `#F8F7F2` | `#1E1E1E` |
+| Surface | `#FFFEFB` | `#282828` |
+| Sidebar | `#F3F1EB` | `#191919` |
+| Accent | `#CC785C` | `#D47D60` |
+| Border | `rgba(0,0,0,0.09)` | `rgba(255,255,255,0.10)` |
+| Row Highlight | `rgba(0,0,0,0.055)` | `rgba(255,255,255,0.11)` |
+| Primary Text | `#24211D` | `#F1ECE5` |
+| Secondary Text | `#68625A` | `#B8B0A6` |
+| Tertiary Text | `#9B948A` | `#817A72` |
+
+- **一句话原则**：暖奶油画布、**单一暖橙强调色**（Accent）、系统字体 + **路径/技术字段等宽**、**1px 发丝边框**与连续圆角、克制层次；状态色沿用系统语义，避免与主 Accent 竞争。

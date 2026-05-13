@@ -118,6 +118,7 @@ struct SettingsSidebarColumn: View {
             .onHover { isHovering in
                 isBackButtonHovered = isHovering
             }
+            .porterPointingHandCursor()
 
             Rectangle()
                 .fill(Color.porterBorder.opacity(0.7))
@@ -160,6 +161,7 @@ struct SettingsSidebarColumn: View {
         .onHover { isHovering in
             hoveredSection = isHovering ? section : nil
         }
+        .porterPointingHandCursor()
     }
 }
 
@@ -278,6 +280,7 @@ private struct AppearanceModePicker: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(mode.title)
+                .porterPointingHandCursor()
             }
         }
         .padding(3)
