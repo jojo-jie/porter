@@ -20,6 +20,18 @@ expectEqual(
     "move command quotes paths and uses --"
 )
 
+expectEqual(
+    RemoteShellPath.removeItemShellCommand(path: "/tmp/a b", recursive: false),
+    #"rm -f -- '/tmp/a b'"#,
+    "remove file command quotes path and uses --"
+)
+
+expectEqual(
+    RemoteShellPath.removeItemShellCommand(path: "/tmp/c'd", recursive: true),
+    #"rm -rf -- '/tmp/c'"'"'d'"#,
+    "remove directory command quotes path and uses --"
+)
+
 expectEqual(RemotePathCodec.split(""), ["~"], "empty input splits to home")
 expectEqual(RemotePathCodec.split("~"), ["~"], "tilde splits to home")
 expectEqual(RemotePathCodec.split("~/uploads"), ["~", "uploads"], "home-relative input splits into components")

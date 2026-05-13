@@ -22,6 +22,14 @@ public enum RemoteShellPath {
         "mv -- \(remoteSingleQuoted(oldPath)) \(remoteSingleQuoted(newPath))"
     }
 
+    /// POSIX `sh` snippet: remove a file/symlink (`rm -f`) or directory tree (`rm -rf`), with safely quoted path.
+    public static func removeItemShellCommand(path: String, recursive: Bool) -> String {
+        if recursive {
+            return "rm -rf -- \(remoteSingleQuoted(path))"
+        }
+        return "rm -f -- \(remoteSingleQuoted(path))"
+    }
+
     static func remoteSingleQuoted(_ value: String) -> String {
         "'" + value.replacingOccurrences(of: "'", with: "'\"'\"'") + "'"
     }

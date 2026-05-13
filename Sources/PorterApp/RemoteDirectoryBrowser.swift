@@ -366,15 +366,22 @@ private struct RemoteDirectoryBrowserSheet: View {
         let entry: RemoteListingEntry
     }
 
+    private struct DeleteConfirmation: Identifiable {
+        let id = UUID()
+        let entry: RemoteListingEntry
+    }
+
     @State private var selectedName: String?
     @State private var filterText = ""
     @State private var listRefreshSpin = 0
     @State private var hoveredName: String?
     @State private var downloadingNames: Set<String> = []
     @State private var renamingNames: Set<String> = []
+    @State private var deletingNames: Set<String> = []
     @State private var footerStatusMessage: String?
     @State private var pendingRenamePrompt: RenamePrompt?
     @State private var pendingRenameConfirmation: RenameConfirmation?
+    @State private var pendingDeleteConfirmation: DeleteConfirmation?
     @State private var renameDraftName = ""
     @FocusState private var isRenamePromptFocused: Bool
 
@@ -416,11 +423,17 @@ private struct RemoteDirectoryBrowserSheet: View {
                 renameConfirmationOverlay(pendingRenameConfirmation)
                     .transition(.opacity.combined(with: .scale(scale: 0.98)))
             }
+
+            if let pendingDeleteConfirmation {
+                deleteConfirmationOverlay(pendingDeleteConfirmation)
+                    .transition(.opacity.combined(with: .scale(scale: 0.98)))
+            }
         }
         .frame(width: 680, height: 520)
         .background(Color.porterCanvas)
         .animation(.easeOut(duration: 0.16), value: pendingRenamePrompt?.id)
         .animation(.easeOut(duration: 0.16), value: pendingRenameConfirmation?.id)
+        .animation(.easeOut(duration: 0.16), value: pendingDeleteConfirmation?.id)
         .task {
             await browser.refreshList()
         }
@@ -644,7 +657,7 @@ private struct RemoteDirectoryBrowserSheet: View {
             Text("类型")
                 .frame(width: 72, alignment: .leading)
             Text("操作")
-                .frame(width: 88, alignment: .center)
+                .frame(width: 118, alignment: .center)
         }
         .font(.system(.caption2).weight(.semibold))
         .foregroundStyle(.tertiary)
@@ -708,8 +721,9 @@ private struct RemoteDirectoryBrowserSheet: View {
             HStack(spacing: 6) {
                 downloadCell(for: entry)
                 renameCell(for: entry)
+                deleteCell(for: entry)
             }
-            .frame(width: 88, alignment: .center)
+            .frame(width: 118, alignment: .center)
         }
         .padding(.vertical, 8)
         .padding(.horizontal, 8)
@@ -730,7 +744,7 @@ private struct RemoteDirectoryBrowserSheet: View {
 
     @ViewBuilder
     private func downloadCell(for entry: RemoteListingEntry) -> some View {
-        if entry.name != "..", hoveredName == entry.name || downloadingNames.contains(entry.name) || renamingNames.contains(entry.name) {
+        if entry.name != "..", hoveredName == entry.name || downloadingNames.contains(entry.name) || renamingNames.contains(entry.name) || deletingNames.contains(entry.name) {
             Button {
                 chooseDestinationAndDownload(entry)
             } label: {
@@ -747,14 +761,14 @@ private struct RemoteDirectoryBrowserSheet: View {
             .foregroundStyle(Color.porterAccent)
             .help("下载到本地目录")
             .accessibilityLabel("下载 \(entry.name)")
-            .disabled(downloadingNames.contains(entry.name) || renamingNames.contains(entry.name))
-            .porterPointingHandCursor(!downloadingNames.contains(entry.name) && !renamingNames.contains(entry.name))
+            .disabled(downloadingNames.contains(entry.name) || renamingNames.contains(entry.name) || deletingNames.contains(entry.name))
+            .porterPointingHandCursor(!downloadingNames.contains(entry.name) && !renamingNames.contains(entry.name) && !deletingNames.contains(entry.name))
         }
     }
 
     @ViewBuilder
     private func renameCell(for entry: RemoteListingEntry) -> some View {
-        if entry.name != "..", hoveredName == entry.name || renamingNames.contains(entry.name) || downloadingNames.contains(entry.name) {
+        if entry.name != "..", hoveredName == entry.name || renamingNames.contains(entry.name) || downloadingNames.contains(entry.name) || deletingNames.contains(entry.name) {
             Button {
                 beginRename(entry)
             } label: {
@@ -771,13 +785,37 @@ private struct RemoteDirectoryBrowserSheet: View {
             .foregroundStyle(Color.porterAccent)
             .help("重命名远端文件或文件夹")
             .accessibilityLabel("重命名 \(entry.name)")
-            .disabled(renamingNames.contains(entry.name) || downloadingNames.contains(entry.name))
-            .porterPointingHandCursor(!renamingNames.contains(entry.name) && !downloadingNames.contains(entry.name))
+            .disabled(renamingNames.contains(entry.name) || downloadingNames.contains(entry.name) || deletingNames.contains(entry.name))
+            .porterPointingHandCursor(!renamingNames.contains(entry.name) && !downloadingNames.contains(entry.name) && !deletingNames.contains(entry.name))
+        }
+    }
+
+    @ViewBuilder
+    private func deleteCell(for entry: RemoteListingEntry) -> some View {
+        if entry.name != "..", hoveredName == entry.name || deletingNames.contains(entry.name) || downloadingNames.contains(entry.name) || renamingNames.contains(entry.name) {
+            Button {
+                beginDelete(entry)
+            } label: {
+                if deletingNames.contains(entry.name) {
+                    ProgressView()
+                        .controlSize(.small)
+                        .scaleEffect(0.65)
+                } else {
+                    Image(systemName: "trash")
+                        .imageScale(.medium)
+                }
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(Color.red.opacity(0.88))
+            .help("删除远端文件或文件夹")
+            .accessibilityLabel("删除 \(entry.name)")
+            .disabled(deletingNames.contains(entry.name) || downloadingNames.contains(entry.name) || renamingNames.contains(entry.name))
+            .porterPointingHandCursor(!deletingNames.contains(entry.name) && !downloadingNames.contains(entry.name) && !renamingNames.contains(entry.name))
         }
     }
 
     private func chooseDestinationAndDownload(_ entry: RemoteListingEntry) {
-        guard !downloadingNames.contains(entry.name) else { return }
+        guard !downloadingNames.contains(entry.name), !deletingNames.contains(entry.name) else { return }
 
         let panel = NSOpenPanel()
         panel.title = "选择下载保存目录"
@@ -806,7 +844,7 @@ private struct RemoteDirectoryBrowserSheet: View {
     }
 
     private func beginRename(_ entry: RemoteListingEntry) {
-        guard !renamingNames.contains(entry.name), !downloadingNames.contains(entry.name) else { return }
+        guard !renamingNames.contains(entry.name), !downloadingNames.contains(entry.name), !deletingNames.contains(entry.name) else { return }
 
         renameDraftName = entry.name
         pendingRenamePrompt = RenamePrompt(entry: entry)
@@ -880,6 +918,58 @@ private struct RemoteDirectoryBrowserSheet: View {
                 footerStatusMessage = snippet.isEmpty
                     ? "重命名失败（退出码 \(exitCode)）。"
                     : "重命名失败（退出码 \(exitCode)）：\n\(snippet)"
+            }
+        }
+    }
+
+    private func beginDelete(_ entry: RemoteListingEntry) {
+        guard !deletingNames.contains(entry.name), !downloadingNames.contains(entry.name), !renamingNames.contains(entry.name) else { return }
+        pendingDeleteConfirmation = DeleteConfirmation(entry: entry)
+    }
+
+    private func confirmDelete(_ confirmation: DeleteConfirmation) {
+        pendingDeleteConfirmation = nil
+        performDelete(confirmation.entry)
+    }
+
+    private func cancelDeleteConfirmation() {
+        pendingDeleteConfirmation = nil
+    }
+
+    private func performDelete(_ entry: RemoteListingEntry) {
+        let path = browser.remotePath(for: entry)
+        let bash = """
+        set -e
+        \(RemoteShellPath.removeItemShellCommand(path: path, recursive: entry.isDirectory))
+        """
+        let host = browser.hostAlias
+        let name = entry.name
+
+        deletingNames.insert(name)
+        footerStatusMessage = "正在删除：\(name)…"
+
+        Task {
+            let (exitCode, output) = await Task.detached(priority: .userInitiated) {
+                RemoteSSH.run(host: host, bash: bash)
+            }.value
+            deletingNames.remove(name)
+            if exitCode == 0 {
+                footerStatusMessage = "删除完成：\(name)"
+                if selectedName == name {
+                    selectedName = nil
+                }
+                await browser.refreshList()
+            } else {
+                let tail = output
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .replacingOccurrences(of: "\r\n", with: "\n")
+                let snippet =
+                    tail.split(separator: "\n", omittingEmptySubsequences: false)
+                        .prefix(4)
+                        .joined(separator: "\n")
+                footerStatusMessage = snippet.isEmpty
+                    ? "删除失败（退出码 \(exitCode)）。"
+                    : "删除失败（退出码 \(exitCode)）：\n\(snippet)"
             }
         }
     }
@@ -1112,6 +1202,111 @@ private struct RemoteDirectoryBrowserSheet: View {
                 .overlay(
                     RoundedRectangle(cornerRadius: 10, style: .continuous)
                         .strokeBorder(Color.porterAccent.opacity(0.55), lineWidth: 1.5)
+                )
+        }
+    }
+
+    private func deleteConfirmationOverlay(_ confirmation: DeleteConfirmation) -> some View {
+        ZStack {
+            Color.black.opacity(0.18)
+                .ignoresSafeArea()
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    cancelDeleteConfirmation()
+                }
+
+            VStack(alignment: .leading, spacing: 0) {
+                ZStack(alignment: .topTrailing) {
+                    VStack(alignment: .leading, spacing: 16) {
+                        deleteTargetField(confirmation.entry)
+
+                        Text(
+                            confirmation.entry.isDirectory
+                                ? "将删除整个文件夹及其中的全部内容。此操作无法在 Porter 内撤销。"
+                                : "远端文件将立即被删除。此操作无法在 Porter 内撤销。"
+                        )
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(.horizontal, 24)
+                    .padding(.top, 34)
+                    .padding(.bottom, 24)
+
+                    Button {
+                        cancelDeleteConfirmation()
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .symbolRenderingMode(.hierarchical)
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.top, 12)
+                    .padding(.trailing, 12)
+                    .accessibilityLabel("关闭删除确认")
+                    .porterPointingHandCursor()
+                }
+
+                HStack(spacing: 10) {
+                    Spacer()
+                    Button("取消", role: .cancel) {
+                        cancelDeleteConfirmation()
+                    }
+                    .keyboardShortcut(.cancelAction)
+                    .porterPointingHandCursor()
+
+                    Button("删除", role: .destructive) {
+                        confirmDelete(confirmation)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                    .porterPointingHandCursor()
+                }
+                .padding(.horizontal, 24)
+                .padding(.top, 8)
+                .padding(.bottom, 24)
+            }
+            .frame(width: 560)
+            .background(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(Color.porterSurface)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .strokeBorder(Color.porterBorder, lineWidth: 1)
+            )
+            .shadow(color: .black.opacity(0.20), radius: 22, x: 0, y: 12)
+            .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .onTapGesture {}
+        }
+    }
+
+    private func deleteTargetField(_ entry: RemoteListingEntry) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("将删除 *")
+                .font(.system(.caption).weight(.medium))
+                .foregroundStyle(Color.red.opacity(0.88))
+                .padding(.horizontal, 6)
+                .background(Color.porterSurface)
+                .offset(x: 12, y: 8)
+                .zIndex(1)
+
+            Text(entry.name)
+                .font(.system(size: 16, design: .monospaced))
+                .foregroundStyle(.primary)
+                .lineLimit(2)
+                .truncationMode(.middle)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+                .background(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(Color.porterSurface.opacity(0.85))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .strokeBorder(Color.red.opacity(0.45), lineWidth: 1.5)
                 )
         }
     }
