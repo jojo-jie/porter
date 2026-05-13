@@ -24,6 +24,8 @@
     <string>14.0</string>
     <key>NSHighResolutionCapable</key>
     <true/>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>Porter 需要控制系统“终端”来打开 SSH 会话。</string>
     <key>NSPrincipalClass</key>
     <string>NSApplication</string>
 </dict>

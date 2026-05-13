@@ -329,7 +329,14 @@ struct ContentView: View {
     private func openSSHTest(host: String) {
         let command = "ssh -- \(localShellQuoted(host))"
         let script = "tell application \"Terminal\" to do script \(appleScriptQuoted(command))"
-        NSAppleScript(source: script)?.executeAndReturnError(nil)
+        var errorInfo: NSDictionary?
+        NSAppleScript(source: script)?.executeAndReturnError(&errorInfo)
+
+        if let errorInfo {
+            let message = errorInfo[NSAppleScript.errorMessage] as? String
+                ?? "请检查“系统设置 > 隐私与安全性 > 自动化”中 Porter 控制 Terminal 的权限。"
+            showTerminalOpenError(message)
+        }
     }
 
     private func localShellQuoted(_ value: String) -> String {
@@ -338,6 +345,15 @@ struct ContentView: View {
 
     private func appleScriptQuoted(_ value: String) -> String {
         "\"\(value.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\""))\""
+    }
+
+    private func showTerminalOpenError(_ detail: String) {
+        let alert = NSAlert()
+        alert.messageText = "无法打开终端"
+        alert.informativeText = detail
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "好")
+        alert.runModal()
     }
 }
 
