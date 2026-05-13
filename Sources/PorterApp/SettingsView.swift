@@ -59,31 +59,43 @@ final class AppearanceSettingsStore: ObservableObject {
     }
 }
 
-struct SettingsView: View {
-    @EnvironmentObject private var appearanceSettings: AppearanceSettingsStore
-    @State private var selection: SettingsSection = .appearance
+enum SettingsSection: String, CaseIterable, Identifiable {
+    case appearance
+    case configuration
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .appearance: return "外观"
+        case .configuration: return "配置"
+        }
+    }
+
+    var subtitle: String {
+        switch self {
+        case .appearance: return "调整 Porter 的主题外观。"
+        case .configuration: return "查看当前配置来源和主窗口中的连接设置说明。"
+        }
+    }
+
+    var symbolName: String {
+        switch self {
+        case .appearance: return "sun.max"
+        case .configuration: return "gearshape"
+        }
+    }
+}
+
+/// 嵌入 `NavigationSplitView` 左栏；与主页共用同一导航结构，避免切换时窗口工具栏重算导致抖动。
+struct SettingsSidebarColumn: View {
+    @Binding var selection: SettingsSection
     @State private var isBackButtonHovered = false
     @State private var hoveredSection: SettingsSection?
+
     let onDismiss: () -> Void
 
     var body: some View {
-        HStack(spacing: 0) {
-            settingsSidebar
-                .frame(width: 236)
-                .background(Color.porterSidebar)
-
-            Rectangle()
-                .fill(Color.porterBorder)
-                .frame(width: 1)
-
-            settingsContent
-        }
-        .tint(.porterAccent)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.porterCanvas)
-    }
-
-    private var settingsSidebar: some View {
         VStack(alignment: .leading, spacing: 0) {
             Button {
                 onDismiss()
@@ -121,7 +133,9 @@ struct SettingsView: View {
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 12)
-        .padding(.top, 14)
+        .padding(.top, 8)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(Color.porterSidebar)
     }
 
     private func sidebarButton(for section: SettingsSection) -> some View {
@@ -147,8 +161,13 @@ struct SettingsView: View {
             hoveredSection = isHovering ? section : nil
         }
     }
+}
 
-    private var settingsContent: some View {
+struct SettingsDetailColumn: View {
+    @EnvironmentObject private var appearanceSettings: AppearanceSettingsStore
+    @Binding var selection: SettingsSection
+
+    var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
             VStack(alignment: .leading, spacing: 22) {
                 contentHeader
@@ -270,34 +289,6 @@ private struct AppearanceModePicker: View {
             Capsule(style: .continuous)
                 .strokeBorder(Color.porterBorder.opacity(0.5), lineWidth: 1)
         )
-    }
-}
-
-private enum SettingsSection: String, CaseIterable, Identifiable {
-    case appearance
-    case configuration
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .appearance: return "外观"
-        case .configuration: return "配置"
-        }
-    }
-
-    var subtitle: String {
-        switch self {
-        case .appearance: return "调整 Porter 的主题外观。"
-        case .configuration: return "查看当前配置来源和主窗口中的连接设置说明。"
-        }
-    }
-
-    var symbolName: String {
-        switch self {
-        case .appearance: return "sun.max"
-        case .configuration: return "gearshape"
-        }
     }
 }
 

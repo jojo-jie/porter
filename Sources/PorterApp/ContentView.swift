@@ -9,20 +9,37 @@ struct ContentView: View {
     @State private var isDropTargeted = false
     @State private var isRemoteBrowserPresented = false
     @State private var isSettingsPresented = false
+    @State private var settingsSection: SettingsSection = .appearance
     @State private var sidebarSearchText = ""
     @State private var hoveredHostID: SSHHost.ID?
     @State private var refreshSpin = 0
 
     var body: some View {
-        ZStack {
-            if isSettingsPresented {
-                SettingsView {
-                    isSettingsPresented = false
+        NavigationSplitView {
+            Group {
+                if isSettingsPresented {
+                    SettingsSidebarColumn(selection: $settingsSection) {
+                        isSettingsPresented = false
+                    }
+                    .navigationSplitViewColumnWidth(min: 220, ideal: 236, max: 360)
+                } else {
+                    sidebarView
                 }
-                .environmentObject(appearanceSettings)
-                .transition(.opacity)
-            } else {
-                workspaceView
+            }
+            .navigationTitle("Porter")
+        } detail: {
+            Group {
+                if isSettingsPresented {
+                    SettingsDetailColumn(selection: $settingsSection)
+                } else {
+                    workspaceDetailColumn
+                }
+            }
+        }
+        .navigationSplitViewStyle(.balanced)
+        .overlay {
+            if isRemoteBrowserPresented {
+                remoteBrowserOverlay
                     .transition(.opacity)
             }
         }
@@ -39,9 +56,9 @@ struct ContentView: View {
             }
         }
         .animation(.easeOut(duration: 0.16), value: isRemoteBrowserPresented)
-        .animation(.easeOut(duration: 0.16), value: isSettingsPresented)
         .onReceive(NotificationCenter.default.publisher(for: .porterShowSettings)) { _ in
             isRemoteBrowserPresented = false
+            settingsSection = .appearance
             isSettingsPresented = true
         }
         .onChange(of: sidebarSearchText) { _, _ in
@@ -52,53 +69,42 @@ struct ContentView: View {
         }
     }
 
-    private var workspaceView: some View {
-        NavigationSplitView {
-            sidebarView
-        } detail: {
-            GeometryReader { proxy in
-                ZStack(alignment: .topLeading) {
-                    Color.porterCanvas.ignoresSafeArea()
+    private var workspaceDetailColumn: some View {
+        GeometryReader { proxy in
+            ZStack(alignment: .topLeading) {
+                Color.porterCanvas.ignoresSafeArea()
 
-                    LinearGradient(
-                        colors: [
-                            Color.black.opacity(0.032),
-                            Color.black.opacity(0.010),
-                            Color.clear,
-                        ],
-                        startPoint: .leading,
-                        endPoint: .trailing
-                    )
-                    .frame(width: 20)
-                    .blendMode(.plusDarker)
-                    .allowsHitTesting(false)
-                    .ignoresSafeArea()
+                LinearGradient(
+                    colors: [
+                        Color.black.opacity(0.032),
+                        Color.black.opacity(0.010),
+                        Color.clear,
+                    ],
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+                .frame(width: 20)
+                .blendMode(.plusDarker)
+                .allowsHitTesting(false)
+                .ignoresSafeArea()
 
-                    ScrollView(.vertical, showsIndicators: true) {
-                        detailView
-                            .frame(
-                                maxWidth: .infinity,
-                                minHeight: detailContentMinimumHeight(for: proxy),
-                                alignment: .topLeading
-                            )
-                            .padding(.horizontal, detailHorizontalPadding(for: proxy.size.width))
-                            .padding(.top, proxy.safeAreaInsets.top + 20)
-                            .padding(.bottom, 28)
-                    }
-                    .porterOverlayScrollIndicators()
-                    .scrollContentBackground(.hidden)
+                ScrollView(.vertical, showsIndicators: true) {
+                    detailView
+                        .frame(
+                            maxWidth: .infinity,
+                            minHeight: detailContentMinimumHeight(for: proxy),
+                            alignment: .topLeading
+                        )
+                        .padding(.horizontal, detailHorizontalPadding(for: proxy.size.width))
+                        .padding(.top, proxy.safeAreaInsets.top + 20)
+                        .padding(.bottom, 28)
                 }
-            }
-            .frame(minWidth: 760, minHeight: 520)
-            .compositingGroup()
-        }
-        .navigationSplitViewStyle(.balanced)
-        .overlay {
-            if isRemoteBrowserPresented {
-                remoteBrowserOverlay
-                    .transition(.opacity)
+                .porterOverlayScrollIndicators()
+                .scrollContentBackground(.hidden)
             }
         }
+        .frame(minWidth: 760, minHeight: 520)
+        .compositingGroup()
     }
 
     private var sidebarView: some View {
@@ -165,7 +171,6 @@ struct ContentView: View {
         }
         .background(Color.porterSidebar)
         .navigationSplitViewColumnWidth(min: 220, ideal: 280, max: 360)
-        .navigationTitle("Porter")
     }
 
     private func hostSidebarButton(for host: SSHHost) -> some View {
