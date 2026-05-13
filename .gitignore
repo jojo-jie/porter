@@ -1,14 +1,28 @@
 # Swift Package Manager
 .build/
-.swiftpm/configuration/
+
+# SPM + Xcode (“Open Package”) 生成的本机索引与工作区缓存
+.swiftpm/
 
 # Xcode
 DerivedData/
 *.xcuserstate
 xcuserdata/
 
+# Profiler / Coverage（instruments、llvm-cov）
+*.profraw
+*.profdata
+
+# Credentials / local env（勿提交密钥）
+.env
+.env.*
+!.env.example
+
 # macOS
 .DS_Store
+
+# Release artifacts
+dist/
 
 # Editor
 .vscode/
