@@ -255,6 +255,7 @@ private struct AppearanceModePicker: View {
                         Capsule(style: .continuous)
                             .fill(selection == mode ? Color.porterSurface.opacity(0.95) : Color.clear)
                     )
+                    .contentShape(Capsule(style: .continuous))
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(mode.title)
