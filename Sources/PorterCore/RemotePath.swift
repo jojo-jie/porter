@@ -18,6 +18,9 @@ public enum RemoteShellPath {
     }
 
     /// POSIX `sh` snippet: rename/move with safely quoted full paths (`mv -- src dst`).
+    ///
+    /// Paths are single-quoted per ``remoteSingleQuoted(_:)`` (no unescaped user interpolation). For cross-host safety,
+    /// validate basename segments with ``RemoteFileNameValidation`` before building paths.
     public static func moveItemShellCommand(from oldPath: String, to newPath: String) -> String {
         "mv -- \(remoteSingleQuoted(oldPath)) \(remoteSingleQuoted(newPath))"
     }

@@ -157,6 +157,7 @@ struct ContentView: View {
                 .padding(.horizontal, 10)
                 .padding(.top, 4)
                 .padding(.bottom, 10)
+                .transaction { $0.disablesAnimations = true }
             }
             .overlay {
                 if filteredHosts.isEmpty {
@@ -178,7 +179,9 @@ struct ContentView: View {
         let isHighlighted = model.selectedHostID == host.id || hoveredHostID == host.id
 
         return Button {
-            model.selectedHostID = host.id
+            withoutAnimation {
+                model.selectedHostID = host.id
+            }
         } label: {
             HostSidebarRow(host: host)
                 .padding(.horizontal, 10)
@@ -188,13 +191,22 @@ struct ContentView: View {
                     RoundedRectangle(cornerRadius: 10, style: .continuous)
                         .fill(isHighlighted ? Color.porterSidebarRowHighlight : Color.clear)
                 )
+                .animation(nil, value: isHighlighted)
                 .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
         .buttonStyle(.plain)
+        .porterPointingHandCursor(false)
         .onHover { isHovering in
-            hoveredHostID = isHovering ? host.id : nil
+            withoutAnimation {
+                hoveredHostID = isHovering ? host.id : nil
+            }
         }
-        .porterPointingHandCursor()
+    }
+
+    private func withoutAnimation(_ updates: () -> Void) {
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction, updates)
     }
 
     private var refreshHostsButton: some View {
@@ -239,7 +251,6 @@ struct ContentView: View {
                 .onTapGesture {
                     isRemoteBrowserPresented = false
                 }
-                .porterPointingHandCursor()
 
             if let host = model.selectedHost {
                 RemoteDirectoryBrowserContainer(

@@ -110,15 +110,17 @@ struct SettingsSidebarColumn: View {
                         RoundedRectangle(cornerRadius: 10, style: .continuous)
                             .fill(isBackButtonHovered ? Color.porterSidebarRowHighlight : Color.clear)
                     )
+                    .animation(nil, value: isBackButtonHovered)
                     .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
             }
             .buttonStyle(.plain)
             .foregroundStyle(.secondary)
             .keyboardShortcut(.cancelAction)
             .onHover { isHovering in
-                isBackButtonHovered = isHovering
+                withoutAnimation {
+                    isBackButtonHovered = isHovering
+                }
             }
-            .porterPointingHandCursor()
 
             Rectangle()
                 .fill(Color.porterBorder.opacity(0.7))
@@ -143,7 +145,9 @@ struct SettingsSidebarColumn: View {
         let isHighlighted = selection == section || hoveredSection == section
 
         return Button {
-            selection = section
+            withoutAnimation {
+                selection = section
+            }
         } label: {
             Label(section.title, systemImage: section.symbolName)
                 .font(.system(.body).weight(selection == section ? .semibold : .regular))
@@ -154,14 +158,22 @@ struct SettingsSidebarColumn: View {
                     RoundedRectangle(cornerRadius: 10, style: .continuous)
                         .fill(isHighlighted ? Color.porterSidebarRowHighlight : Color.clear)
                 )
+                .animation(nil, value: isHighlighted)
         }
         .buttonStyle(.plain)
         .foregroundStyle(selection == section ? Color.primary : Color.secondary)
         .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         .onHover { isHovering in
-            hoveredSection = isHovering ? section : nil
+            withoutAnimation {
+                hoveredSection = isHovering ? section : nil
+            }
         }
-        .porterPointingHandCursor()
+    }
+
+    private func withoutAnimation(_ updates: () -> Void) {
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction, updates)
     }
 }
 

@@ -299,7 +299,7 @@ struct DropZone: View {
 }
 
 extension View {
-    /// 可点击区域悬停时显示手型指针（`NSCursor.pointingHand`）。
+    /// 按钮型操作悬停时显示手型指针（`NSCursor.pointingHand`）。
     func porterPointingHandCursor(_ enabled: Bool = true) -> some View {
         modifier(PorterPointingHandCursorModifier(enabled: enabled))
     }
@@ -311,15 +311,50 @@ private struct PorterPointingHandCursorModifier: ViewModifier {
     @ViewBuilder
     func body(content: Content) -> some View {
         if enabled {
-            content.onHover { hovering in
-                if hovering {
-                    NSCursor.pointingHand.push()
-                } else {
-                    NSCursor.pop()
-                }
+            content.overlay {
+                PorterCursorArea(cursor: .pointingHand)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .allowsHitTesting(false)
             }
         } else {
             content
+        }
+    }
+}
+
+private struct PorterCursorArea: NSViewRepresentable {
+    let cursor: NSCursor
+
+    func makeNSView(context: Context) -> CursorView {
+        let view = CursorView()
+        view.cursor = cursor
+        return view
+    }
+
+    func updateNSView(_ nsView: CursorView, context: Context) {
+        nsView.cursor = cursor
+    }
+
+    final class CursorView: NSView {
+        var cursor: NSCursor = .arrow {
+            didSet {
+                window?.invalidateCursorRects(for: self)
+            }
+        }
+
+        override func resetCursorRects() {
+            super.resetCursorRects()
+            addCursorRect(bounds, cursor: cursor)
+        }
+
+        override func layout() {
+            super.layout()
+            window?.invalidateCursorRects(for: self)
+        }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            window?.invalidateCursorRects(for: self)
         }
     }
 }

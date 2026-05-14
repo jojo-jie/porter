@@ -190,6 +190,9 @@ private final class RemoteDirectoryBrowserModel: ObservableObject {
     private var pastSegments: [[String]] = []
     private var futureSegments: [[String]] = []
 
+    /// Invalidates in-flight list fetches so stale SSH results cannot overwrite a newer directory.
+    private var activeListRequestID: UInt64 = 0
+
     var currentLogicalPath: String { RemotePathCodec.join(segments) }
 
     init(hostAlias: String, initialPath: String) {
@@ -197,33 +200,40 @@ private final class RemoteDirectoryBrowserModel: ObservableObject {
         self.segments = RemotePathCodec.split(initialPath)
     }
 
-    func replacePathAndReload(_ newSegments: [String]) {
-        guard !isLoading, newSegments != segments else { return }
+    private func beginListLoad() -> UInt64 {
+        activeListRequestID &+= 1
         isLoading = true
+        errorMessage = nil
+        return activeListRequestID
+    }
+
+    func replacePathAndReload(_ newSegments: [String]) {
+        guard newSegments != segments else { return }
+        let requestID = beginListLoad()
         pastSegments.append(segments)
         futureSegments.removeAll()
         segments = newSegments
         syncHistoryFlags()
-        Task { await refreshList() }
+        Task { await performListFetch(requestID: requestID, segmentsSnapshot: newSegments) }
     }
 
     func goBack() {
-        guard !isLoading, let prev = pastSegments.popLast() else { return }
-        isLoading = true
+        guard let prev = pastSegments.popLast() else { return }
+        let requestID = beginListLoad()
         futureSegments.insert(segments, at: 0)
         segments = prev
-        Task { await refreshList() }
         syncHistoryFlags()
+        Task { await performListFetch(requestID: requestID, segmentsSnapshot: prev) }
     }
 
     func goForward() {
-        guard !isLoading, !futureSegments.isEmpty else { return }
-        isLoading = true
+        guard !futureSegments.isEmpty else { return }
+        let requestID = beginListLoad()
         let next = futureSegments.removeFirst()
         pastSegments.append(segments)
         segments = next
-        Task { await refreshList() }
         syncHistoryFlags()
+        Task { await performListFetch(requestID: requestID, segmentsSnapshot: next) }
     }
 
     func goToParent() {
@@ -232,7 +242,6 @@ private final class RemoteDirectoryBrowserModel: ObservableObject {
     }
 
     func openEntry(_ entry: RemoteListingEntry) {
-        guard !isLoading else { return }
         if entry.name == ".." {
             goToParent()
             return
@@ -242,7 +251,6 @@ private final class RemoteDirectoryBrowserModel: ObservableObject {
     }
 
     func goToBreadcrumb(index: Int) {
-        guard !isLoading else { return }
         guard index >= 0, index < segments.count else { return }
         let prefix = Array(segments.prefix(index + 1))
         guard prefix != segments else { return }
@@ -263,11 +271,14 @@ private final class RemoteDirectoryBrowserModel: ObservableObject {
     }
 
     func refreshList() async {
-        isLoading = true
-        errorMessage = nil
+        let snapshot = segments
+        let requestID = beginListLoad()
+        await performListFetch(requestID: requestID, segmentsSnapshot: snapshot)
+    }
 
+    private func performListFetch(requestID: UInt64, segmentsSnapshot: [String]) async {
         let host = hostAlias
-        let path = RemotePathCodec.join(segments)
+        let path = RemotePathCodec.join(segmentsSnapshot)
         let script = """
         set -e
         \(RemoteShellPath.changeDirectoryCommand(for: path))
@@ -279,6 +290,8 @@ private final class RemoteDirectoryBrowserModel: ObservableObject {
         let (exitCode, output) = await Task.detached(priority: .userInitiated) {
             RemoteSSH.run(host: host, bash: script)
         }.value
+
+        guard requestID == activeListRequestID else { return }
 
         isLoading = false
         syncHistoryFlags()
@@ -309,7 +322,7 @@ private final class RemoteDirectoryBrowserModel: ObservableObject {
             return lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
         }
 
-        if RemotePathCodec.parent(of: segments) != nil {
+        if RemotePathCodec.parent(of: segmentsSnapshot) != nil {
             parsed.insert(.parentDirectory, at: 0)
         }
         entries = parsed
@@ -350,16 +363,188 @@ private final class RemoteDirectoryBrowserModel: ObservableObject {
     }
 }
 
+private final class RemoteListingClickTracker {
+    private var lastClickedName: String?
+    private var lastClickTime = Date.distantPast
+
+    func registerClick(on name: String, at now: Date = Date()) -> Bool {
+        let isDoubleClick = lastClickedName == name
+            && now.timeIntervalSince(lastClickTime) <= 0.32
+        lastClickedName = name
+        lastClickTime = now
+        return isDoubleClick
+    }
+}
+
+private struct RemoteListingRow: View, Equatable {
+    let entry: RemoteListingEntry
+    let isSelected: Bool
+    let isHovered: Bool
+    let isDownloading: Bool
+    let isRenaming: Bool
+    let isDeleting: Bool
+    let onRowTap: () -> Void
+    let onHoverChange: (Bool) -> Void
+    let onDownload: () -> Void
+    let onRename: () -> Void
+    let onDelete: () -> Void
+
+    private var isBusy: Bool {
+        isDownloading || isRenaming || isDeleting
+    }
+
+    private var isHighlighted: Bool {
+        isSelected || isHovered
+    }
+
+    private var shouldShowActions: Bool {
+        entry.name != ".." && (isHovered || isBusy)
+    }
+
+    var body: some View {
+        HStack(spacing: 0) {
+            rowContent
+                .contentShape(Rectangle())
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .onTapGesture(perform: onRowTap)
+
+            HStack(spacing: 6) {
+                if shouldShowActions {
+                    downloadButton
+                    renameButton
+                    deleteButton
+                }
+            }
+            .frame(width: 118, alignment: .center)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(isHighlighted ? Color.porterSidebarRowHighlight : Color.clear)
+        )
+        .contentShape(Rectangle())
+        .transaction { $0.disablesAnimations = true }
+        .onHover(perform: onHoverChange)
+    }
+
+    private var rowContent: some View {
+        HStack(spacing: 0) {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: entry.name == ".." ? "arrow.turn.up.left" : (entry.isDirectory ? "folder.fill" : "doc"))
+                    .foregroundStyle(entry.name == ".." ? Color.secondary : (entry.isDirectory ? Color.porterAccent : Color.secondary.opacity(0.85)))
+                    .frame(width: 20, alignment: .center)
+                    .imageScale(.medium)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(entry.name)
+                        .font(.system(.body, design: .default))
+                        .foregroundStyle(entry.navigable || entry.name == ".." ? Color.primary : Color.secondary)
+
+                    if !entry.permissions.isEmpty {
+                        Text(entry.permissions)
+                            .font(.system(.caption2, design: .monospaced))
+                            .foregroundStyle(.quaternary)
+                    }
+                }
+                .multilineTextAlignment(.leading)
+
+                Spacer(minLength: 0)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            Text(entry.modifiedDisplay)
+                .font(.system(.callout, design: .monospaced))
+                .foregroundStyle(.secondary)
+                .frame(width: 150, alignment: .leading)
+                .lineLimit(1)
+
+            Text(entry.sizeDisplay)
+                .font(.system(.callout, design: .monospaced))
+                .foregroundStyle(.secondary)
+                .frame(width: 88, alignment: .trailing)
+                .lineLimit(1)
+
+            Text(entry.kindLabel)
+                .font(.system(.callout))
+                .foregroundStyle(.tertiary)
+                .frame(width: 72, alignment: .leading)
+                .lineLimit(1)
+        }
+    }
+
+    private var downloadButton: some View {
+        Button(action: onDownload) {
+            if isDownloading {
+                ProgressView()
+                    .controlSize(.small)
+                    .scaleEffect(0.65)
+            } else {
+                Image(systemName: "arrow.down.circle")
+                    .imageScale(.medium)
+            }
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(Color.porterAccent)
+        .help("下载到本地目录")
+        .accessibilityLabel("下载 \(entry.name)")
+        .disabled(isBusy)
+        .porterPointingHandCursor(!isBusy)
+    }
+
+    private var renameButton: some View {
+        Button(action: onRename) {
+            if isRenaming {
+                ProgressView()
+                    .controlSize(.small)
+                    .scaleEffect(0.65)
+            } else {
+                Image(systemName: "pencil.line")
+                    .imageScale(.medium)
+            }
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(Color.porterAccent)
+        .help("重命名远端文件或文件夹")
+        .accessibilityLabel("重命名 \(entry.name)")
+        .disabled(isBusy)
+        .porterPointingHandCursor(!isBusy)
+    }
+
+    private var deleteButton: some View {
+        Button(action: onDelete) {
+            if isDeleting {
+                ProgressView()
+                    .controlSize(.small)
+                    .scaleEffect(0.65)
+            } else {
+                Image(systemName: "trash")
+                    .imageScale(.medium)
+            }
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(Color.red.opacity(0.88))
+        .help("删除远端文件或文件夹")
+        .accessibilityLabel("删除 \(entry.name)")
+        .disabled(isBusy)
+        .porterPointingHandCursor(!isBusy)
+    }
+
+    nonisolated static func == (lhs: RemoteListingRow, rhs: RemoteListingRow) -> Bool {
+        lhs.entry == rhs.entry
+            && lhs.isSelected == rhs.isSelected
+            && lhs.isHovered == rhs.isHovered
+            && lhs.isDownloading == rhs.isDownloading
+            && lhs.isRenaming == rhs.isRenaming
+            && lhs.isDeleting == rhs.isDeleting
+    }
+}
+
 private struct RemoteDirectoryBrowserSheet: View {
     @ObservedObject var browser: RemoteDirectoryBrowserModel
     @Binding var boundPath: String
     let onDismiss: () -> Void
-
-    private struct RenameConfirmation: Identifiable {
-        let id = UUID()
-        let entry: RemoteListingEntry
-        let newName: String
-    }
 
     private struct RenamePrompt: Identifiable {
         let id = UUID()
@@ -375,14 +560,17 @@ private struct RemoteDirectoryBrowserSheet: View {
     @State private var filterText = ""
     @State private var listRefreshSpin = 0
     @State private var hoveredName: String?
+    @State private var rowClickTracker = RemoteListingClickTracker()
     @State private var downloadingNames: Set<String> = []
     @State private var renamingNames: Set<String> = []
     @State private var deletingNames: Set<String> = []
     @State private var footerStatusMessage: String?
     @State private var pendingRenamePrompt: RenamePrompt?
-    @State private var pendingRenameConfirmation: RenameConfirmation?
     @State private var pendingDeleteConfirmation: DeleteConfirmation?
     @State private var renameDraftName = ""
+    /// Inline validation under the rename field (non-nil → red caption).
+    @State private var renamePromptErrorText: String?
+    @State private var renameCardShakePhase: CGFloat = 0
     @FocusState private var isRenamePromptFocused: Bool
 
     var body: some View {
@@ -419,11 +607,6 @@ private struct RemoteDirectoryBrowserSheet: View {
                     .transition(.opacity.combined(with: .scale(scale: 0.98)))
             }
 
-            if let pendingRenameConfirmation {
-                renameConfirmationOverlay(pendingRenameConfirmation)
-                    .transition(.opacity.combined(with: .scale(scale: 0.98)))
-            }
-
             if let pendingDeleteConfirmation {
                 deleteConfirmationOverlay(pendingDeleteConfirmation)
                     .transition(.opacity.combined(with: .scale(scale: 0.98)))
@@ -432,13 +615,17 @@ private struct RemoteDirectoryBrowserSheet: View {
         .frame(width: 680, height: 520)
         .background(Color.porterCanvas)
         .animation(.easeOut(duration: 0.16), value: pendingRenamePrompt?.id)
-        .animation(.easeOut(duration: 0.16), value: pendingRenameConfirmation?.id)
         .animation(.easeOut(duration: 0.16), value: pendingDeleteConfirmation?.id)
         .task {
             await browser.refreshList()
         }
         .onChange(of: browser.segments) { _, _ in
             filterText = ""
+            selectedName = nil
+        }
+        .onChange(of: pendingRenamePrompt?.id) { _, _ in
+            renamePromptErrorText = nil
+            renameCardShakePhase = 0
         }
     }
 
@@ -611,18 +798,21 @@ private struct RemoteDirectoryBrowserSheet: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
                 .padding(24)
             } else {
-                List(selection: $selectedName) {
-                    Section {
-                        ForEach(displayedEntries) { entry in
-                            listingRow(entry)
-                                .tag(entry.name as String?)
+                VStack(alignment: .leading, spacing: 0) {
+                    tableHeaderRow
+
+                    ScrollView(.vertical, showsIndicators: true) {
+                        LazyVStack(alignment: .leading, spacing: 4) {
+                            ForEach(displayedEntries) { entry in
+                                listingRow(entry)
+                            }
                         }
-                    } header: {
-                        tableHeaderRow
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 6)
+                        .transaction { $0.disablesAnimations = true }
                     }
+                    .porterOverlayScrollIndicators()
                 }
-                .listStyle(.plain)
-                .scrollContentBackground(.hidden)
             }
 
             if !browser.isLoading, browser.errorMessage == nil, displayedEntries.isEmpty {
@@ -640,6 +830,7 @@ private struct RemoteDirectoryBrowserSheet: View {
                     ProgressView()
                         .controlSize(.regular)
                 }
+                .allowsHitTesting(false)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
@@ -662,79 +853,60 @@ private struct RemoteDirectoryBrowserSheet: View {
         .font(.system(.caption2).weight(.semibold))
         .foregroundStyle(.tertiary)
         .textCase(nil)
-        .padding(.horizontal, 8)
+        .padding(.horizontal, 18)
         .padding(.vertical, 8)
         .background(Color.porterSurface.opacity(0.9))
+        .porterPointingHandCursor(false)
     }
 
     private func listingRow(_ entry: RemoteListingEntry) -> some View {
-        HStack(spacing: 0) {
-            HStack(spacing: 0) {
-                HStack(alignment: .top, spacing: 10) {
-                    Image(systemName: entry.name == ".." ? "arrow.turn.up.left" : (entry.isDirectory ? "folder.fill" : "doc"))
-                        .foregroundStyle(entry.name == ".." ? Color.secondary : (entry.isDirectory ? Color.porterAccent : Color.secondary.opacity(0.85)))
-                        .frame(width: 20, alignment: .center)
-                        .imageScale(.medium)
-
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(entry.name)
-                            .font(.system(.body, design: .default))
-                            .foregroundStyle(entry.navigable || entry.name == ".." ? Color.primary : Color.secondary)
-
-                        if !entry.permissions.isEmpty {
-                            Text(entry.permissions)
-                                .font(.system(.caption2, design: .monospaced))
-                                .foregroundStyle(.quaternary)
-                        }
-                    }
-                    .multilineTextAlignment(.leading)
-
-                    Spacer(minLength: 0)
+        RemoteListingRow(
+            entry: entry,
+            isSelected: selectedName == entry.name,
+            isHovered: hoveredName == entry.name,
+            isDownloading: downloadingNames.contains(entry.name),
+            isRenaming: renamingNames.contains(entry.name),
+            isDeleting: deletingNames.contains(entry.name),
+            onRowTap: {
+                handleListingRowTap(entry)
+            },
+            onHoverChange: { isHovering in
+                withoutAnimation {
+                    hoveredName = isHovering ? entry.name : (hoveredName == entry.name ? nil : hoveredName)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-                Text(entry.modifiedDisplay)
-                    .font(.system(.callout, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 150, alignment: .leading)
-                    .lineLimit(1)
-
-                Text(entry.sizeDisplay)
-                    .font(.system(.callout, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 88, alignment: .trailing)
-                    .lineLimit(1)
-
-                Text(entry.kindLabel)
-                    .font(.system(.callout))
-                    .foregroundStyle(.tertiary)
-                    .frame(width: 72, alignment: .leading)
-                    .lineLimit(1)
+            },
+            onDownload: {
+                chooseDestinationAndDownload(entry)
+            },
+            onRename: {
+                beginRename(entry)
+            },
+            onDelete: {
+                beginDelete(entry)
             }
-            .contentShape(Rectangle())
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .onTapGesture {
-                openListingEntry(entry)
-            }
-            .porterPointingHandCursor(!browser.isLoading)
+        )
+        .equatable()
+    }
 
-            HStack(spacing: 6) {
-                downloadCell(for: entry)
-                renameCell(for: entry)
-                deleteCell(for: entry)
-            }
-            .frame(width: 118, alignment: .center)
-        }
-        .padding(.vertical, 8)
-        .padding(.horizontal, 8)
-        .onHover { isHovering in
-            hoveredName = isHovering ? entry.name : (hoveredName == entry.name ? nil : hoveredName)
+    private func selectListingEntry(_ entry: RemoteListingEntry) {
+        withoutAnimation {
+            selectedName = entry.name
         }
     }
 
-    private func openListingEntry(_ entry: RemoteListingEntry) {
+    private func handleListingRowTap(_ entry: RemoteListingEntry) {
+        selectListingEntry(entry)
+
+        if rowClickTracker.registerClick(on: entry.name) {
+            navigateIntoListingEntry(entry)
+        }
+    }
+
+    private func navigateIntoListingEntry(_ entry: RemoteListingEntry) {
         guard !browser.isLoading else { return }
-        selectedName = entry.name
+        withoutAnimation {
+            selectedName = entry.name
+        }
         if entry.name == ".." {
             browser.goToParent()
         } else if entry.navigable, entry.isDirectory {
@@ -742,76 +914,10 @@ private struct RemoteDirectoryBrowserSheet: View {
         }
     }
 
-    @ViewBuilder
-    private func downloadCell(for entry: RemoteListingEntry) -> some View {
-        if entry.name != "..", hoveredName == entry.name || downloadingNames.contains(entry.name) || renamingNames.contains(entry.name) || deletingNames.contains(entry.name) {
-            Button {
-                chooseDestinationAndDownload(entry)
-            } label: {
-                if downloadingNames.contains(entry.name) {
-                    ProgressView()
-                        .controlSize(.small)
-                        .scaleEffect(0.65)
-                } else {
-                    Image(systemName: "arrow.down.circle")
-                        .imageScale(.medium)
-                }
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(Color.porterAccent)
-            .help("下载到本地目录")
-            .accessibilityLabel("下载 \(entry.name)")
-            .disabled(downloadingNames.contains(entry.name) || renamingNames.contains(entry.name) || deletingNames.contains(entry.name))
-            .porterPointingHandCursor(!downloadingNames.contains(entry.name) && !renamingNames.contains(entry.name) && !deletingNames.contains(entry.name))
-        }
-    }
-
-    @ViewBuilder
-    private func renameCell(for entry: RemoteListingEntry) -> some View {
-        if entry.name != "..", hoveredName == entry.name || renamingNames.contains(entry.name) || downloadingNames.contains(entry.name) || deletingNames.contains(entry.name) {
-            Button {
-                beginRename(entry)
-            } label: {
-                if renamingNames.contains(entry.name) {
-                    ProgressView()
-                        .controlSize(.small)
-                        .scaleEffect(0.65)
-                } else {
-                    Image(systemName: "pencil.line")
-                        .imageScale(.medium)
-                }
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(Color.porterAccent)
-            .help("重命名远端文件或文件夹")
-            .accessibilityLabel("重命名 \(entry.name)")
-            .disabled(renamingNames.contains(entry.name) || downloadingNames.contains(entry.name) || deletingNames.contains(entry.name))
-            .porterPointingHandCursor(!renamingNames.contains(entry.name) && !downloadingNames.contains(entry.name) && !deletingNames.contains(entry.name))
-        }
-    }
-
-    @ViewBuilder
-    private func deleteCell(for entry: RemoteListingEntry) -> some View {
-        if entry.name != "..", hoveredName == entry.name || deletingNames.contains(entry.name) || downloadingNames.contains(entry.name) || renamingNames.contains(entry.name) {
-            Button {
-                beginDelete(entry)
-            } label: {
-                if deletingNames.contains(entry.name) {
-                    ProgressView()
-                        .controlSize(.small)
-                        .scaleEffect(0.65)
-                } else {
-                    Image(systemName: "trash")
-                        .imageScale(.medium)
-                }
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(Color.red.opacity(0.88))
-            .help("删除远端文件或文件夹")
-            .accessibilityLabel("删除 \(entry.name)")
-            .disabled(deletingNames.contains(entry.name) || downloadingNames.contains(entry.name) || renamingNames.contains(entry.name))
-            .porterPointingHandCursor(!deletingNames.contains(entry.name) && !downloadingNames.contains(entry.name) && !renamingNames.contains(entry.name))
-        }
+    private func withoutAnimation(_ updates: () -> Void) {
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction, updates)
     }
 
     private func chooseDestinationAndDownload(_ entry: RemoteListingEntry) {
@@ -847,41 +953,76 @@ private struct RemoteDirectoryBrowserSheet: View {
         guard !renamingNames.contains(entry.name), !downloadingNames.contains(entry.name), !deletingNames.contains(entry.name) else { return }
 
         renameDraftName = entry.name
+        renamePromptErrorText = nil
+        renameCardShakePhase = 0
         pendingRenamePrompt = RenamePrompt(entry: entry)
     }
 
     private func continueRenamePrompt(_ prompt: RenamePrompt) {
+        if let issue = RemoteFileNameValidation.validatePortableFileName(renameDraftName) {
+            presentRenameValidationFailure(renameValidationMessage(for: issue))
+            return
+        }
         let newName = renameDraftName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !newName.isEmpty else {
-            footerStatusMessage = "重命名已取消：名称不能为空。"
-            return
-        }
         guard newName != prompt.entry.name else {
-            footerStatusMessage = "名称未改变。"
-            pendingRenamePrompt = nil
-            return
-        }
-        guard !newName.contains("/") else {
-            footerStatusMessage = "名称不能包含「/」。"
+            presentRenameValidationFailure("请输入与当前名称不同的名称。")
             return
         }
 
+        renamePromptErrorText = nil
         pendingRenamePrompt = nil
-        pendingRenameConfirmation = RenameConfirmation(entry: prompt.entry, newName: newName)
+        renameDraftName = ""
+        performRename(prompt.entry, to: newName)
+    }
+
+    private func renameValidationMessage(for issue: RemoteFileNameValidation.Issue) -> String {
+        switch issue {
+        case .empty:
+            return "名称不能为空。"
+        case .hasInvisibleEdgeWhitespace:
+            return "名称首尾不能含有空白或换行（不可见字符在 Windows / SMB 上易出问题）。"
+        case .reservedAlias:
+            return "不能使用名称「.」或「..」。"
+        case .forbiddenCharacterOrControl:
+            return "名称不能含有 / \\ : * ? \" < > | 以及控制字符；亦不可含路径分隔符（跨平台与安全限制）。"
+        case .trailingPeriodDisallowedOnWindows:
+            return "名称不能以英文句点「.」结尾（Windows / SMB 不兼容）。"
+        case .windowsReservedDeviceName:
+            return "该名称与 Windows 保留设备名冲突（如 CON、NUL、COM1 等），请改用其他名称。"
+        case .utf8TooLong(let limit):
+            return "名称过长（单段至多 \(limit) 字节 UTF-8，兼容常见 Linux / macOS / Windows 限制）。"
+        }
+    }
+
+    private func presentRenameValidationFailure(_ message: String) {
+        renamePromptErrorText = message
+        triggerRenameCardShake()
+        footerStatusMessage = nil
+    }
+
+    private func triggerRenameCardShake() {
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            renameCardShakePhase = 0
+        }
+        withAnimation(.easeOut(duration: 0.42)) {
+            renameCardShakePhase = 1
+        }
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(0.44))
+            var done = Transaction()
+            done.disablesAnimations = true
+            withTransaction(done) {
+                renameCardShakePhase = 0
+            }
+        }
     }
 
     private func cancelRenamePrompt() {
         pendingRenamePrompt = nil
         renameDraftName = ""
-    }
-
-    private func confirmRename(_ confirmation: RenameConfirmation) {
-        pendingRenameConfirmation = nil
-        performRename(confirmation.entry, to: confirmation.newName)
-    }
-
-    private func cancelRenameConfirmation() {
-        pendingRenameConfirmation = nil
+        renamePromptErrorText = nil
     }
 
     private func performRename(_ entry: RemoteListingEntry, to newName: String) {
@@ -988,10 +1129,18 @@ private struct RemoteDirectoryBrowserSheet: View {
                     VStack(alignment: .leading, spacing: 16) {
                         renamePromptField
 
-                        Text("请输入新的文件或文件夹名称。远端路径会在下一步确认后生效。")
+                        Text("请输入新的文件或文件夹名称。点击下方「确认」后，远端会立即使用该名称。")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
+
+                        if let renamePromptErrorText {
+                            Text(renamePromptErrorText)
+                                .font(.caption)
+                                .foregroundStyle(Color.red)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .transition(.opacity.combined(with: .move(edge: .top)))
+                        }
                     }
                     .padding(.horizontal, 24)
                     .padding(.top, 34)
@@ -1019,7 +1168,7 @@ private struct RemoteDirectoryBrowserSheet: View {
                     .keyboardShortcut(.cancelAction)
                     .porterPointingHandCursor()
 
-                    Button("继续") {
+                    Button("确认") {
                         continueRenamePrompt(prompt)
                     }
                     .buttonStyle(.borderedProminent)
@@ -1044,17 +1193,21 @@ private struct RemoteDirectoryBrowserSheet: View {
             .shadow(color: .black.opacity(0.20), radius: 22, x: 0, y: 12)
             .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
             .onTapGesture {}
+            .modifier(PorterRenameCardShakeEffect(amplitude: 12, phase: renameCardShakePhase))
             .onAppear {
                 isRenamePromptFocused = true
             }
+            .animation(.easeOut(duration: 0.18), value: renamePromptErrorText)
         }
     }
 
     private var renamePromptField: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        let borderAccent = renamePromptErrorText == nil ? Color.porterAccent : Color.red
+
+        return VStack(alignment: .leading, spacing: 4) {
             Text("新名称 *")
                 .font(.system(.caption).weight(.medium))
-                .foregroundStyle(Color.porterAccent)
+                .foregroundStyle(borderAccent)
                 .padding(.horizontal, 6)
                 .background(Color.porterSurface)
                 .offset(x: 12, y: 8)
@@ -1073,136 +1226,11 @@ private struct RemoteDirectoryBrowserSheet: View {
                 )
                 .overlay(
                     RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .strokeBorder(Color.porterAccent.opacity(0.55), lineWidth: 1.5)
+                        .strokeBorder(borderAccent.opacity(renamePromptErrorText == nil ? 0.55 : 0.85), lineWidth: renamePromptErrorText == nil ? 1.5 : 2)
                 )
-        }
-    }
-
-    private func renameConfirmationOverlay(_ confirmation: RenameConfirmation) -> some View {
-        ZStack {
-            Color.black.opacity(0.18)
-                .ignoresSafeArea()
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    cancelRenameConfirmation()
+                .onChange(of: renameDraftName) { _, _ in
+                    renamePromptErrorText = nil
                 }
-
-            VStack(alignment: .leading, spacing: 0) {
-                HStack(alignment: .center, spacing: 16) {
-                    Text("重命名")
-                        .font(.system(size: 28, weight: .semibold))
-                        .foregroundStyle(.primary)
-
-                    Spacer()
-
-                    Button {
-                        cancelRenameConfirmation()
-                    } label: {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 18, weight: .semibold))
-                            .foregroundStyle(.secondary)
-                            .frame(width: 32, height: 32)
-                            .contentShape(Circle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("关闭重命名确认")
-                    .porterPointingHandCursor()
-                }
-                .padding(.horizontal, 24)
-                .padding(.vertical, 20)
-
-                Rectangle()
-                    .fill(Color.porterBorder)
-                    .frame(height: 1)
-
-                VStack(alignment: .leading, spacing: 16) {
-                    Text("请确认新的远端文件或文件夹名称。确认后会立即在远端生效。")
-                        .font(.system(size: 14))
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-
-                    renameConfirmationField(value: confirmation.newName)
-
-                    HStack(spacing: 6) {
-                        Text("原名称")
-                            .font(.system(.caption2).weight(.semibold))
-                            .tracking(0.6)
-                            .foregroundStyle(.tertiary)
-                        Text(confirmation.entry.name)
-                            .font(.system(.caption, design: .monospaced))
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                            .textSelection(.enabled)
-                    }
-                }
-                .padding(.horizontal, 24)
-                .padding(.top, 34)
-                .padding(.bottom, 24)
-
-                HStack(spacing: 10) {
-                    Spacer()
-                    Button("取消", role: .cancel) {
-                        cancelRenameConfirmation()
-                    }
-                    .keyboardShortcut(.cancelAction)
-                    .porterPointingHandCursor()
-
-                    Button("确认") {
-                        confirmRename(confirmation)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(Color.porterAccent)
-                    .keyboardShortcut(.defaultAction)
-                    .controlSize(.large)
-                    .porterPointingHandCursor()
-                }
-                .padding(.horizontal, 24)
-                .padding(.top, 8)
-                .padding(.bottom, 24)
-            }
-            .frame(width: 560)
-            .background(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(Color.porterSurface)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .strokeBorder(Color.porterBorder, lineWidth: 1)
-            )
-            .shadow(color: .black.opacity(0.20), radius: 22, x: 0, y: 12)
-            .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .onTapGesture {}
-        }
-    }
-
-    private func renameConfirmationField(value: String) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("新名称 *")
-                .font(.system(.caption).weight(.medium))
-                .foregroundStyle(Color.porterAccent)
-                .padding(.horizontal, 6)
-                .background(Color.porterSurface)
-                .offset(x: 12, y: 8)
-                .zIndex(1)
-
-            Text(value)
-                .font(.system(size: 16, design: .monospaced))
-                .foregroundStyle(.primary)
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 12)
-                .background(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .fill(Color.porterSurface.opacity(0.85))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .strokeBorder(Color.porterAccent.opacity(0.55), lineWidth: 1.5)
-                )
         }
     }
 
@@ -1354,6 +1382,23 @@ private struct RemoteDirectoryBrowserSheet: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 14)
+    }
+}
+
+/// Horizontal damped shake driven by animating ``phase`` from 0 → 1.
+private struct PorterRenameCardShakeEffect: GeometryEffect {
+    var amplitude: CGFloat
+    var phase: CGFloat
+
+    var animatableData: CGFloat {
+        get { phase }
+        set { phase = newValue }
+    }
+
+    func effectValue(size: CGSize) -> ProjectionTransform {
+        let damping = 1.0 - phase
+        let offset = amplitude * damping * sin(phase * CGFloat.pi * 7)
+        return ProjectionTransform(CGAffineTransform(translationX: offset, y: 0))
     }
 }
 

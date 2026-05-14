@@ -42,4 +42,55 @@ expectEqual(RemotePathCodec.join(["/", "var", "www", "app"]), "/var/www/app", "a
 expectEqual(PorterSFTPBatch.batchQuotedPath("/tmp/a"), "\"/tmp/a\"", "sftp batch quotes plain path")
 expectEqual(PorterSFTPBatch.batchQuotedPath("/tmp/a\\\"b"), "\"/tmp/a\\\\\\\"b\"", "sftp batch escapes quotes and backslashes")
 
+guard RemoteFileNameValidation.validatePortableFileName("readme.txt") == nil else {
+    fatalError("normal file name validates")
+}
+guard RemoteFileNameValidation.validatePortableFileName("") == .empty else {
+    fatalError("empty name")
+}
+guard RemoteFileNameValidation.validatePortableFileName("  ") == .hasInvisibleEdgeWhitespace else {
+    fatalError("whitespace-only should hit edge rule, not silent trim")
+}
+guard RemoteFileNameValidation.validatePortableFileName("ok ") == .hasInvisibleEdgeWhitespace else {
+    fatalError("trailing ASCII space must be rejected explicitly")
+}
+guard RemoteFileNameValidation.validatePortableFileName(".") == .reservedAlias else {
+    fatalError("dot alias rejected")
+}
+guard RemoteFileNameValidation.validatePortableFileName("..") == .reservedAlias else {
+    fatalError("dotdot alias rejected")
+}
+guard RemoteFileNameValidation.validatePortableFileName(".hidden") == nil else {
+    fatalError("dot-prefixed real name allowed")
+}
+guard RemoteFileNameValidation.validatePortableFileName("a/b") == .forbiddenCharacterOrControl else {
+    fatalError("slash rejected in single component")
+}
+guard RemoteFileNameValidation.validatePortableFileName(#"a\b"#) == .forbiddenCharacterOrControl else {
+    fatalError("backslash rejected for Windows/SMB portability")
+}
+guard RemoteFileNameValidation.validatePortableFileName("a\nb") == .forbiddenCharacterOrControl else {
+    fatalError("newline rejected")
+}
+guard RemoteFileNameValidation.validatePortableFileName("a:b") == .forbiddenCharacterOrControl else {
+    fatalError("colon rejected for Windows / streams")
+}
+guard RemoteFileNameValidation.validatePortableFileName("name.") == .trailingPeriodDisallowedOnWindows else {
+    fatalError("trailing period rejected for Windows")
+}
+guard RemoteFileNameValidation.validatePortableFileName("CON.txt") == .windowsReservedDeviceName else {
+    fatalError("windows reserved base name with extension")
+}
+guard RemoteFileNameValidation.validatePortableFileName("nul") == .windowsReservedDeviceName else {
+    fatalError("windows reserved short name")
+}
+guard RemoteFileNameValidation.validatePortableFileName("notcon") == nil else {
+    fatalError("non-reserved prefix should pass")
+}
+guard RemoteFileNameValidation.validatePortableFileName(String(repeating: "x", count: 256))
+    == .utf8TooLong(maxUTF8Bytes: 255)
+else {
+    fatalError("overlong UTF-8 length rejected")
+}
+
 print("Remote path validation passed")
