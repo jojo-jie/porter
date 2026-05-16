@@ -5,6 +5,9 @@ import SwiftUI
 struct PorterApp: App {
     @StateObject private var appearanceSettings = AppearanceSettingsStore()
     @StateObject private var terminalPreferences = TerminalPreferencesStore()
+    @StateObject private var uploadPreferences = UploadPreferencesStore()
+    @StateObject private var downloadPreferences = DownloadPreferencesStore()
+    @StateObject private var sshConfigPreferences = SSHConfigPreferencesStore()
 
     init() {
         // 从 swift run / 终端直接启动裸可执行文件时，默认可能不注册为“普通应用”，
@@ -17,6 +20,9 @@ struct PorterApp: App {
             ContentView()
                 .environmentObject(appearanceSettings)
                 .environmentObject(terminalPreferences)
+                .environmentObject(uploadPreferences)
+                .environmentObject(downloadPreferences)
+                .environmentObject(sshConfigPreferences)
                 .onAppear {
                     NSApplication.shared.activate(ignoringOtherApps: true)
                 }
@@ -45,6 +51,40 @@ private struct PorterAppCommands: Commands {
             }
             .keyboardShortcut(",", modifiers: .command)
         }
+
+        CommandMenu("操作") {
+            Button("选择文件上传…") {
+                post(.porterUploadFiles)
+            }
+            .keyboardShortcut("u", modifiers: .command)
+
+            Button("刷新主机列表") {
+                post(.porterRefreshHosts)
+            }
+            .keyboardShortcut("r", modifiers: .command)
+
+            Button("远端目录浏览") {
+                post(.porterBrowseRemote)
+            }
+            .keyboardShortcut("b", modifiers: .command)
+
+            Divider()
+
+            Button("上一台主机") {
+                post(.porterSelectPreviousHost)
+            }
+            .keyboardShortcut(.upArrow, modifiers: [])
+
+            Button("下一台主机") {
+                post(.porterSelectNextHost)
+            }
+            .keyboardShortcut(.downArrow, modifiers: [])
+        }
+    }
+
+    private func post(_ name: Notification.Name) {
+        NotificationCenter.default.post(name: name, object: nil)
+        NSApplication.shared.activate(ignoringOtherApps: true)
     }
 }
 
@@ -77,4 +117,10 @@ private extension Dictionary where Key == String, Value == Any {
 
 extension Notification.Name {
     static let porterShowSettings = Notification.Name("porter.showSettings")
+    static let porterUploadFiles = Notification.Name("porter.uploadFiles")
+    static let porterRefreshHosts = Notification.Name("porter.refreshHosts")
+    static let porterBrowseRemote = Notification.Name("porter.browseRemote")
+    static let porterSelectPreviousHost = Notification.Name("porter.selectPreviousHost")
+    static let porterSelectNextHost = Notification.Name("porter.selectNextHost")
+    static let porterSSHConfigPathChanged = Notification.Name("porter.sshConfigPathChanged")
 }

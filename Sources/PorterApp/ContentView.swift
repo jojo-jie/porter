@@ -6,6 +6,8 @@ import UniformTypeIdentifiers
 struct ContentView: View {
     @EnvironmentObject private var appearanceSettings: AppearanceSettingsStore
     @EnvironmentObject private var terminalPreferences: TerminalPreferencesStore
+    @EnvironmentObject private var sshConfigPreferences: SSHConfigPreferencesStore
+    @EnvironmentObject private var uploadPreferences: UploadPreferencesStore
     @StateObject private var model = AppModel()
     @State private var isFileImporterPresented = false
     @State private var isDropTargeted = false
@@ -54,14 +56,37 @@ struct ContentView: View {
             allowsMultipleSelection: true
         ) { result in
             if case .success(let urls) = result {
-                model.upload(urls: urls)
+                model.upload(urls: urls, conflictStrategy: uploadPreferences.conflictStrategy)
             }
         }
         .animation(.easeOut(duration: 0.16), value: isRemoteBrowserPresented)
+        .onAppear {
+            model.refreshHosts(using: sshConfigPreferences)
+        }
         .onReceive(NotificationCenter.default.publisher(for: .porterShowSettings)) { _ in
             isRemoteBrowserPresented = false
             settingsSection = .appearance
             isSettingsPresented = true
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .porterUploadFiles)) { _ in
+            guard canRunMainWorkspaceAction else { return }
+            isFileImporterPresented = true
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .porterRefreshHosts)) { _ in
+            performHostsRefresh()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .porterBrowseRemote)) { _ in
+            guard canRunMainWorkspaceAction, model.selectedHost != nil else { return }
+            isRemoteBrowserPresented = true
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .porterSelectPreviousHost)) { _ in
+            selectAdjacentHost(offset: -1)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .porterSelectNextHost)) { _ in
+            selectAdjacentHost(offset: 1)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .porterSSHConfigPathChanged)) { _ in
+            performHostsRefresh()
         }
         .onChange(of: sidebarSearchText) { _, _ in
             syncSelectedHostWithFilteredHosts()
@@ -69,6 +94,10 @@ struct ContentView: View {
         .onChange(of: model.hosts) { _, _ in
             syncSelectedHostWithFilteredHosts()
         }
+    }
+
+    private var canRunMainWorkspaceAction: Bool {
+        !isSettingsPresented && !model.isBusy
     }
 
     private var workspaceDetailColumn: some View {
@@ -104,6 +133,15 @@ struct ContentView: View {
                 .porterOverlayScrollIndicators()
                 .scrollContentBackground(.hidden)
             }
+            .overlay(alignment: .top) {
+                if let notice = model.transientNotice {
+                    PorterTransientToast(notice: notice)
+                        .padding(.horizontal, detailHorizontalPadding(for: proxy.size.width))
+                        .padding(.top, max(20, proxy.safeAreaInsets.top + 12))
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                }
+            }
+            .animation(.easeOut(duration: 0.2), value: model.transientNotice?.id)
         }
         .frame(minWidth: 760, minHeight: 520)
         .compositingGroup()
@@ -166,7 +204,11 @@ struct ContentView: View {
                     ContentUnavailableView(
                         sidebarSearchText.isEmpty ? "没有可用主机" : "未找到匹配主机",
                         systemImage: "magnifyingglass",
-                        description: Text(sidebarSearchText.isEmpty ? "请检查 ~/.ssh/config。" : "请尝试其他主机名称。")
+                        description: Text(
+                            sidebarSearchText.isEmpty
+                                ? "请检查 \(sshConfigPreferences.displayPath)。"
+                                : "请尝试其他主机名称。"
+                        )
                     )
                     .foregroundStyle(.secondary)
                 }
@@ -213,10 +255,7 @@ struct ContentView: View {
 
     private var refreshHostsButton: some View {
         Button {
-            withAnimation(.spring(response: 0.45, dampingFraction: 0.75)) {
-                refreshSpin += 1
-            }
-            model.refreshHosts()
+            performHostsRefresh()
         } label: {
             Image(systemName: "arrow.clockwise")
                 .imageScale(.medium)
@@ -233,7 +272,7 @@ struct ContentView: View {
         }
         .buttonStyle(.plain)
         .foregroundStyle(Color.porterAccent)
-        .help("重新读取 ~/.ssh/config 中的 Host 列表")
+        .help("重新读取 \(sshConfigPreferences.displayPath) 中的 Host 列表（⌘R）")
         .accessibilityLabel("重新读取 SSH 配置")
         .porterPointingHandCursor()
     }
@@ -276,10 +315,36 @@ struct ContentView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
+    private func performHostsRefresh() {
+        withAnimation(.spring(response: 0.45, dampingFraction: 0.75)) {
+            refreshSpin += 1
+        }
+        model.refreshHosts(using: sshConfigPreferences)
+    }
+
     private func syncSelectedHostWithFilteredHosts() {
         let hosts = filteredHosts
         guard !hosts.contains(where: { $0.id == model.selectedHostID }) else { return }
         model.selectedHostID = hosts.first?.id
+    }
+
+    private func selectAdjacentHost(offset: Int) {
+        guard canRunMainWorkspaceAction else { return }
+        let hosts = filteredHosts
+        guard !hosts.isEmpty else { return }
+
+        let currentIndex: Int
+        if let selectedID = model.selectedHostID,
+           let index = hosts.firstIndex(where: { $0.id == selectedID }) {
+            currentIndex = index
+        } else {
+            currentIndex = 0
+        }
+
+        let nextIndex = (currentIndex + offset + hosts.count) % hosts.count
+        withoutAnimation {
+            model.selectedHostID = hosts[nextIndex].id
+        }
     }
 
     private func detailHorizontalPadding(for width: CGFloat) -> CGFloat {
@@ -339,7 +404,7 @@ struct ContentView: View {
             VStack(spacing: 6) {
                 Text("没有可用的 SSH 主机")
                     .font(.system(.title3).weight(.semibold))
-                Text("请在 ~/.ssh/config 中添加 Host alias，然后点击工具栏中的刷新图标重新加载。")
+                Text("请在 \(sshConfigPreferences.displayPath) 中添加 Host alias，然后点击侧栏刷新或按 ⌘R 重新加载。")
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -364,8 +429,20 @@ struct ContentView: View {
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
-            .disabled(model.isUploading)
-            .porterPointingHandCursor(!model.isUploading)
+            .disabled(model.isBusy)
+            .porterPointingHandCursor(!model.isBusy)
+            .keyboardShortcut("u", modifiers: .command)
+
+            Button {
+                model.testConnection()
+            } label: {
+                Label("测试连接", systemImage: "antenna.radiowaves.left.and.right")
+                    .frame(maxWidth: axis == .vertical ? .infinity : nil, alignment: .center)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.large)
+            .disabled(model.isBusy)
+            .porterPointingHandCursor(!model.isBusy)
 
             Button {
                 openSSHTest(host: host)
@@ -375,8 +452,8 @@ struct ContentView: View {
             }
             .buttonStyle(.bordered)
             .controlSize(.large)
-            .disabled(model.isUploading)
-            .porterPointingHandCursor(!model.isUploading)
+            .disabled(model.isBusy)
+            .porterPointingHandCursor(!model.isBusy)
 
             if axis == .horizontal {
                 Spacer(minLength: 0)
@@ -407,7 +484,7 @@ struct ContentView: View {
         }
 
         group.notify(queue: .main) {
-            model.upload(urls: urlStore.snapshot())
+            model.upload(urls: urlStore.snapshot(), conflictStrategy: uploadPreferences.conflictStrategy)
         }
     }
 

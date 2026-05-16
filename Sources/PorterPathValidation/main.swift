@@ -69,6 +69,27 @@ expectEqual(RemotePathCodec.join(["/", "var", "www", "app"]), "/var/www/app", "a
 expectEqual(PorterSFTPBatch.batchQuotedPath("/tmp/a"), "\"/tmp/a\"", "sftp batch quotes plain path")
 expectEqual(PorterSFTPBatch.batchQuotedPath("/tmp/a\\\"b"), "\"/tmp/a\\\\\\\"b\"", "sftp batch escapes quotes and backslashes")
 
+expectEqual(
+    RemotePathCodec.childPath(in: "~/uploads", name: "readme.txt"),
+    "~/uploads/readme.txt",
+    "child path under home directory"
+)
+expectEqual(
+    RemotePathCodec.childPath(in: "/var/www/app", name: "index.html"),
+    "/var/www/app/index.html",
+    "child path under absolute directory"
+)
+expectEqual(
+    RemoteShellPath.itemExistsTestLine(for: "~/uploads/readme.txt"),
+    #"test -e -- "$HOME"/'uploads/readme.txt'"#,
+    "exists probe quotes home-relative path"
+)
+expectEqual(
+    RemoteShellPath.itemExistsTestLine(for: "/var/www/app"),
+    #"test -e -- '/var/www/app'"#,
+    "exists probe quotes absolute path"
+)
+
 guard RemoteFileNameValidation.validatePortableFileName("readme.txt") == nil else {
     fatalError("normal file name validates")
 }

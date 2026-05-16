@@ -113,6 +113,7 @@ final class TerminalPreferencesStore: ObservableObject {
 
 enum SettingsSection: String, CaseIterable, Identifiable {
     case appearance
+    case transfer
     case terminal
     case configuration
 
@@ -121,6 +122,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .appearance: return "外观"
+        case .transfer: return "传输"
         case .terminal: return "终端"
         case .configuration: return "配置"
         }
@@ -129,14 +131,16 @@ enum SettingsSection: String, CaseIterable, Identifiable {
     var subtitle: String {
         switch self {
         case .appearance: return "调整 Porter 的主题外观。"
+        case .transfer: return "上传时若远端已有同名文件或目录时的处理方式。"
         case .terminal: return "选择在主窗口点击「打开终端」时使用的终端应用。"
-        case .configuration: return "查看当前配置来源和主窗口中的连接设置说明。"
+        case .configuration: return "OpenSSH 配置与本机默认下载目录；每台主机的远端目录仍在主窗口设置。"
         }
     }
 
     var symbolName: String {
         switch self {
         case .appearance: return "sun.max"
+        case .transfer: return "arrow.up.arrow.down"
         case .terminal: return "terminal"
         case .configuration: return "gearshape"
         }
@@ -235,6 +239,7 @@ struct SettingsSidebarColumn: View {
 
 struct SettingsDetailColumn: View {
     @EnvironmentObject private var appearanceSettings: AppearanceSettingsStore
+    @EnvironmentObject private var uploadPreferences: UploadPreferencesStore
     @EnvironmentObject private var terminalPreferences: TerminalPreferencesStore
     @Binding var selection: SettingsSection
 
@@ -246,6 +251,8 @@ struct SettingsDetailColumn: View {
                 switch selection {
                 case .appearance:
                     appearancePane
+                case .transfer:
+                    transferPane
                 case .terminal:
                     terminalPane
                 case .configuration:
@@ -303,6 +310,29 @@ struct SettingsDetailColumn: View {
         }
     }
 
+    private var transferPane: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            SettingCard {
+                VStack(alignment: .leading, spacing: 14) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("上传冲突策略")
+                            .font(.system(.headline).weight(.semibold))
+                            .foregroundStyle(.primary)
+
+                        Text("SFTP put 默认直接覆盖，无确认对话框；仅在「跳过」模式下会先检查远端是否已有同名项。")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    UploadConflictStrategyPicker(selection: $uploadPreferences.conflictStrategy)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            Spacer(minLength: 0)
+        }
+    }
+
     private var terminalPane: some View {
         VStack(alignment: .leading, spacing: 16) {
             SettingCard {
@@ -328,11 +358,14 @@ struct SettingsDetailColumn: View {
 
     private var configurationPane: some View {
         VStack(alignment: .leading, spacing: 16) {
+            SSHConfigPathSettingsCard()
+            DefaultDownloadDirectorySettingsCard()
+
             SettingCard {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("配置")
+                    Text("远端目录")
                         .font(.system(.headline).weight(.semibold))
-                    Text("主机与路径配置会继续使用主窗口中的 ~/.ssh/config 与远程目录设置。")
+                    Text("每台主机的默认上传目录仍在主窗口中设置；本机默认下载目录见上方。")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                 }
@@ -340,6 +373,180 @@ struct SettingsDetailColumn: View {
             }
 
             Spacer(minLength: 0)
+        }
+    }
+}
+
+private struct DefaultDownloadDirectorySettingsCard: View {
+    @EnvironmentObject private var downloadPreferences: DownloadPreferencesStore
+
+    private var validationIssue: String? {
+        downloadPreferences.validationIssue
+    }
+
+    private var statusText: String {
+        if let validationIssue {
+            return validationIssue
+        }
+        if downloadPreferences.hasConfiguredPath {
+            return "已设置；远端浏览下载时将直接保存到此目录，不再弹出选择对话框。"
+        }
+        return "未设置；下载时每次选择保存目录。"
+    }
+
+    private var statusColor: Color {
+        validationIssue != nil ? Color.red.opacity(0.9) : Color.secondary
+    }
+
+    var body: some View {
+        SettingCard {
+            VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("默认下载目录")
+                        .font(.system(.headline).weight(.semibold))
+                    Text("留空则每次下载前选择目录；支持 ~ 展开。可填 Downloads 等常用路径。")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+
+                HStack(alignment: .center, spacing: 10) {
+                    TextField("~/Downloads", text: $downloadPreferences.downloadDirectoryPath)
+                        .textFieldStyle(.plain)
+                        .font(.system(.body, design: .monospaced))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 9)
+                        .background(
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .fill(Color.porterCanvas.opacity(0.55))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .strokeBorder(Color.porterBorder, lineWidth: 1)
+                        )
+
+                    Button("选择文件夹…") {
+                        chooseDirectory()
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(Color.porterAccent)
+                    .porterPointingHandCursor()
+
+                    Button("清除") {
+                        downloadPreferences.clear()
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(!downloadPreferences.hasConfiguredPath)
+                    .porterPointingHandCursor()
+                }
+
+                Text(statusText)
+                    .font(.caption)
+                    .foregroundStyle(statusColor)
+                    .textSelection(.enabled)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private func chooseDirectory() {
+        let panel = NSOpenPanel()
+        panel.title = "选择默认下载目录"
+        panel.prompt = "使用此目录"
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.canCreateDirectories = true
+        panel.allowsMultipleSelection = false
+
+        let expanded = (downloadPreferences.downloadDirectoryPath as NSString).expandingTildeInPath
+        if !expanded.isEmpty, FileManager.default.fileExists(atPath: expanded) {
+            panel.directoryURL = URL(fileURLWithPath: expanded, isDirectory: true)
+        }
+
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        downloadPreferences.setDirectory(from: url)
+    }
+}
+
+private struct SSHConfigPathSettingsCard: View {
+    @EnvironmentObject private var sshConfigPreferences: SSHConfigPreferencesStore
+    @State private var isConfigFileImporterPresented = false
+
+    private var validationIssue: String? {
+        SSHConfigPathResolver.validationIssue(forConfigPath: sshConfigPreferences.configPath)
+    }
+
+    private var statusText: String {
+        if let validationIssue {
+            return validationIssue
+        }
+        if sshConfigPreferences.configFileExists {
+            return "文件存在，修改后将自动刷新主机列表。"
+        }
+        return "文件不存在；请检查路径或点击「选择文件」。"
+    }
+
+    private var statusColor: Color {
+        if validationIssue != nil || !sshConfigPreferences.configFileExists {
+            return Color.red.opacity(0.9)
+        }
+        return Color.secondary
+    }
+
+    var body: some View {
+        SettingCard {
+            VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("SSH 配置文件")
+                        .font(.system(.headline).weight(.semibold))
+                    Text("默认 \(SSHConfigPathResolver.defaultConfigPath)；支持 ~ 展开。Include 将相对于该文件所在目录解析。")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+
+                HStack(alignment: .center, spacing: 10) {
+                    TextField(SSHConfigPathResolver.defaultConfigPath, text: $sshConfigPreferences.configPath)
+                        .textFieldStyle(.plain)
+                        .font(.system(.body, design: .monospaced))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 9)
+                        .background(
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .fill(Color.porterCanvas.opacity(0.55))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .strokeBorder(Color.porterBorder, lineWidth: 1)
+                        )
+
+                    Button("选择文件…") {
+                        isConfigFileImporterPresented = true
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(Color.porterAccent)
+                    .porterPointingHandCursor()
+
+                    Button("恢复默认") {
+                        sshConfigPreferences.resetToDefault()
+                    }
+                    .buttonStyle(.bordered)
+                    .porterPointingHandCursor()
+                }
+
+                Text(statusText)
+                    .font(.caption)
+                    .foregroundStyle(statusColor)
+                    .textSelection(.enabled)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .fileImporter(
+            isPresented: $isConfigFileImporterPresented,
+            allowedContentTypes: [.item],
+            allowsMultipleSelection: false
+        ) { result in
+            if case .success(let urls) = result, let url = urls.first {
+                sshConfigPreferences.configPath = url.path
+            }
         }
     }
 }
@@ -386,6 +593,92 @@ private struct AppearanceModePicker: View {
             Capsule(style: .continuous)
                 .strokeBorder(Color.porterBorder.opacity(0.5), lineWidth: 1)
         )
+    }
+}
+
+private struct UploadConflictStrategyPicker: View {
+    @Binding var selection: UploadConflictStrategy
+    @State private var hoveredStrategy: UploadConflictStrategy?
+
+    var body: some View {
+        VStack(spacing: 4) {
+            ForEach(UploadConflictStrategy.allCases) { strategy in
+                UploadConflictStrategyRow(
+                    strategy: strategy,
+                    isSelected: selection == strategy,
+                    isHighlighted: selection == strategy || hoveredStrategy == strategy,
+                    onSelect: { selection = strategy },
+                    onHoverChange: { hovering in
+                        withoutAnimation {
+                            hoveredStrategy = hovering ? strategy : nil
+                        }
+                    }
+                )
+            }
+        }
+    }
+
+    private func withoutAnimation(_ updates: () -> Void) {
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction, updates)
+    }
+}
+
+private struct UploadConflictStrategyRow: View {
+    let strategy: UploadConflictStrategy
+    let isSelected: Bool
+    let isHighlighted: Bool
+    let onSelect: () -> Void
+    let onHoverChange: (Bool) -> Void
+
+    var body: some View {
+        Button(action: onSelect) {
+            HStack(alignment: .center, spacing: 14) {
+                Image(systemName: strategy.symbolName)
+                    .font(.system(size: 18, weight: .medium))
+                    .foregroundStyle(isSelected ? Color.porterAccent : Color.secondary)
+                    .frame(width: 26, alignment: .center)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(strategy.title)
+                        .font(.system(.body).weight(isSelected ? .semibold : .regular))
+                        .foregroundStyle(Color.primary)
+
+                    Text(strategy.subtitle)
+                        .font(.footnote)
+                        .foregroundStyle(Color.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer(minLength: 8)
+
+                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 20, weight: .regular))
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(isSelected ? Color.porterAccent : Color.secondary.opacity(0.45))
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                    .fill(isHighlighted ? Color.porterSurface.opacity(0.55) : Color.clear)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                    .strokeBorder(
+                        isSelected ? Color.porterAccent.opacity(0.35) : Color.porterBorder.opacity(0.45),
+                        lineWidth: 1
+                    )
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(isSelected ? [.isSelected] : [])
+        .accessibilityLabel("\(strategy.title)，\(strategy.subtitle)")
+        .porterPointingHandCursor()
+        .onHover(perform: onHoverChange)
     }
 }
 

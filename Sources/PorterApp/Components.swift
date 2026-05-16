@@ -169,10 +169,73 @@ struct PathField: View {
                 .porterPointingHandCursor()
             }
 
-            Text("可直接输入路径，或通过右侧按钮连接远端浏览；上传时路径将交给 scp，连接仍走 ~/.ssh/config。")
+            Text("可直接输入路径，或通过右侧按钮连接远端浏览；上传走 SFTP，SSH 连接使用设置中指定的配置文件。")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
         }
+    }
+}
+
+struct TransientNotice: Identifiable, Equatable {
+    let id = UUID()
+    let message: String
+    let kind: Kind
+
+    enum Kind: Equatable {
+        case success
+        case error
+    }
+
+    static func kind(forConnectionTestResult result: String) -> Kind {
+        if result.contains("失败") || result.contains("错误") { return .error }
+        return .success
+    }
+}
+
+struct PorterTransientToast: View {
+    let notice: TransientNotice
+
+    private var symbolName: String {
+        switch notice.kind {
+        case .success: return "checkmark.circle.fill"
+        case .error: return "xmark.circle.fill"
+        }
+    }
+
+    private var accentColor: Color {
+        switch notice.kind {
+        case .success: return Color.green.opacity(0.92)
+        case .error: return Color.red.opacity(0.92)
+        }
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: symbolName)
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(accentColor)
+                .symbolRenderingMode(.hierarchical)
+
+            Text(notice.message)
+                .font(.system(.callout, design: .monospaced))
+                .foregroundStyle(.primary)
+                .multilineTextAlignment(.leading)
+                .lineLimit(3)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 11)
+        .frame(maxWidth: 420, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.porterSurface.opacity(0.96))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(Color.porterBorder, lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.14), radius: 12, x: 0, y: 6)
+        .accessibilityLabel(notice.message)
     }
 }
 
@@ -185,7 +248,7 @@ struct StatusRow: View {
     private var kind: Kind {
         if isUploading { return .progress }
         if log.contains("失败") || log.contains("错误") { return .error }
-        if log.contains("完成") { return .success }
+        if log.contains("完成") || log.contains("连接正常") { return .success }
         return .idle
     }
 

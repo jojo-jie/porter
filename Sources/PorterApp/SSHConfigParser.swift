@@ -2,11 +2,10 @@ import Darwin
 import Foundation
 
 enum SSHConfigParser {
-    static func loadHosts() -> [SSHHost] {
-        let configURL = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".ssh/config")
+    static func loadHosts(configURL: URL? = nil) -> [SSHHost] {
+        let url = configURL ?? SSHConfigPathResolver.resolvedFileURL(forConfigPath: SSHConfigPathResolver.defaultConfigPath)
         var visited = Set<URL>()
-        let lines = readLines(from: configURL, visited: &visited)
+        let lines = readLines(from: url, visited: &visited)
         return parse(lines: lines)
     }
 
@@ -162,14 +161,7 @@ enum SSHConfigParser {
     }
 
     private static func expandTilde(_ path: String) -> String {
-        if path == "~" {
-            return FileManager.default.homeDirectoryForCurrentUser.path
-        }
-        if path.hasPrefix("~/") {
-            return FileManager.default.homeDirectoryForCurrentUser
-                .appendingPathComponent(String(path.dropFirst(2))).path
-        }
-        return path
+        SSHConfigPathResolver.expandTilde(path)
     }
 
     private static func glob(_ pattern: String) -> [String] {

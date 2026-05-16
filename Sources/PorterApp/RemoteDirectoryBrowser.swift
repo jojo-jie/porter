@@ -542,6 +542,7 @@ private struct RemoteListingRow: View, Equatable {
 }
 
 private struct RemoteDirectoryBrowserSheet: View {
+    @EnvironmentObject private var downloadPreferences: DownloadPreferencesStore
     @ObservedObject var browser: RemoteDirectoryBrowserModel
     @Binding var boundPath: String
     let onDismiss: () -> Void
@@ -923,15 +924,25 @@ private struct RemoteDirectoryBrowserSheet: View {
     private func chooseDestinationAndDownload(_ entry: RemoteListingEntry) {
         guard !downloadingNames.contains(entry.name), !deletingNames.contains(entry.name) else { return }
 
-        let panel = NSOpenPanel()
-        panel.title = "选择下载保存目录"
-        panel.prompt = "下载到此目录"
-        panel.canChooseFiles = false
-        panel.canChooseDirectories = true
-        panel.canCreateDirectories = true
-        panel.allowsMultipleSelection = false
+        let destination: URL
+        if let defaultDirectory = downloadPreferences.resolvedDirectoryURL {
+            destination = defaultDirectory
+        } else {
+            let panel = NSOpenPanel()
+            panel.title = "选择下载保存目录"
+            panel.prompt = "下载到此目录"
+            panel.canChooseFiles = false
+            panel.canChooseDirectories = true
+            panel.canCreateDirectories = true
+            panel.allowsMultipleSelection = false
+            let expanded = (downloadPreferences.downloadDirectoryPath as NSString).expandingTildeInPath
+            if !expanded.isEmpty, FileManager.default.fileExists(atPath: expanded) {
+                panel.directoryURL = URL(fileURLWithPath: expanded, isDirectory: true)
+            }
 
-        guard panel.runModal() == .OK, let destination = panel.url else { return }
+            guard panel.runModal() == .OK, let chosen = panel.url else { return }
+            destination = chosen
+        }
 
         let remotePath = browser.remotePath(for: entry)
         downloadingNames.insert(entry.name)

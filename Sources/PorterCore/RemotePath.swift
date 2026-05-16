@@ -106,4 +106,28 @@ public enum RemotePathCodec {
         next.append(name)
         return next
     }
+
+    /// Remote path after uploading `name` into `directory` (e.g. `~/uploads` + `readme.txt`).
+    public static func childPath(in directory: String, name: String) -> String {
+        join(appendComponent(split(directory), name))
+    }
+}
+
+extension RemoteShellPath {
+    /// POSIX `test -e` for a remote path, with the same `~` / quoting rules as ``changeDirectoryCommand(for:)``.
+    public static func itemExistsTestLine(for path: String) -> String {
+        let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalized = trimmed.isEmpty ? "~" : trimmed
+        if normalized == "~" || normalized == "~/" {
+            return "test -e -- \"$HOME\""
+        }
+        if normalized.hasPrefix("~/") {
+            let tail = String(normalized.dropFirst(2))
+            return "test -e -- \"$HOME\"/\(remoteSingleQuoted(tail))"
+        }
+        if normalized.hasPrefix("-") {
+            return "test -e -- ./\(remoteSingleQuoted(normalized))"
+        }
+        return "test -e -- \(remoteSingleQuoted(normalized))"
+    }
 }
