@@ -1,9 +1,11 @@
 import AppKit
+import PorterCore
 import SwiftUI
 import UniformTypeIdentifiers
 
 struct ContentView: View {
     @EnvironmentObject private var appearanceSettings: AppearanceSettingsStore
+    @EnvironmentObject private var terminalPreferences: TerminalPreferencesStore
     @StateObject private var model = AppModel()
     @State private var isFileImporterPresented = false
     @State private var isDropTargeted = false
@@ -366,7 +368,7 @@ struct ContentView: View {
             .porterPointingHandCursor(!model.isUploading)
 
             Button {
-                openSSHTest(host: host.name)
+                openSSHTest(host: host)
             } label: {
                 Label("打开终端", systemImage: "terminal")
                     .frame(maxWidth: axis == .vertical ? .infinity : nil, alignment: .center)
@@ -409,21 +411,49 @@ struct ContentView: View {
         }
     }
 
-    private func openSSHTest(host: String) {
-        let command = "ssh -- \(localShellQuoted(host))"
-        let script = "tell application \"Terminal\" to do script \(appleScriptQuoted(command))"
-        var errorInfo: NSDictionary?
-        NSAppleScript(source: script)?.executeAndReturnError(&errorInfo)
+    private func openSSHTest(host: SSHHost) {
+        let remotePath = model.defaultPaths[host.id, default: ""]
+        let command = PorterSSHInteractiveCommand.localShellInvocation(hostAlias: host.name, remotePath: remotePath)
 
-        if let errorInfo {
-            let message = errorInfo[NSAppleScript.errorMessage] as? String
-                ?? "请检查“系统设置 > 隐私与安全性 > 自动化”中 Porter 控制 Terminal 的权限。"
-            showTerminalOpenError(message)
+        switch terminalPreferences.selectedApp {
+        case .appleTerminal:
+            let script = """
+            tell application "Terminal"
+                activate
+                do script \(appleScriptQuoted(command))
+            end tell
+            """
+            runAppleScriptOrAlert(
+                source: script,
+                fallbackMessage: "请检查“系统设置 > 隐私与安全性 > 自动化”中 Porter 控制“终端”的权限。"
+            )
+        case .warp:
+            Task { @MainActor in
+                switch await WarpLaunchConfiguration.openSSHSession(command: command, hostLabel: host.name) {
+                case .success(let statusMessage):
+                    model.log = statusMessage
+                case .failed(let message):
+                    showTerminalOpenError(message)
+                }
+            }
+        case .iterm2:
+            switch ITermLaunchConfiguration.openSSHSession(command: command) {
+            case .success:
+                break
+            case .failed(let message):
+                showTerminalOpenError(message)
+            }
         }
     }
 
-    private func localShellQuoted(_ value: String) -> String {
-        "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
+    private func runAppleScriptOrAlert(source: String, fallbackMessage: String) {
+        var errorInfo: NSDictionary?
+        NSAppleScript(source: source)?.executeAndReturnError(&errorInfo)
+
+        if let errorInfo {
+            let message = errorInfo[NSAppleScript.errorMessage] as? String ?? fallbackMessage
+            showTerminalOpenError(message)
+        }
     }
 
     private func appleScriptQuoted(_ value: String) -> String {

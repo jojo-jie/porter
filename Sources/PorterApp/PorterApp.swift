@@ -4,6 +4,7 @@ import SwiftUI
 @main
 struct PorterApp: App {
     @StateObject private var appearanceSettings = AppearanceSettingsStore()
+    @StateObject private var terminalPreferences = TerminalPreferencesStore()
 
     init() {
         // 从 swift run / 终端直接启动裸可执行文件时，默认可能不注册为“普通应用”，
@@ -15,6 +16,7 @@ struct PorterApp: App {
         WindowGroup {
             ContentView()
                 .environmentObject(appearanceSettings)
+                .environmentObject(terminalPreferences)
                 .onAppear {
                     NSApplication.shared.activate(ignoringOtherApps: true)
                 }

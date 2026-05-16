@@ -1,4 +1,9 @@
+import Foundation
 import PorterCore
+
+private func posixSingleQuotedForTest(_ value: String) -> String {
+    "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
+}
 
 private func expectEqual<T: Equatable>(_ actual: T, _ expected: T, _ message: String) {
     guard actual == expected else {
@@ -13,6 +18,28 @@ expectEqual(RemoteShellPath.changeDirectoryCommand(for: "~/two words/it's"), #"c
 expectEqual(RemoteShellPath.changeDirectoryCommand(for: "/var/www/app"), #"cd '/var/www/app'"#, "absolute path is quoted")
 expectEqual(RemoteShellPath.changeDirectoryCommand(for: "relative path/it's"), #"cd 'relative path/it'"'"'s'"#, "relative path escapes quotes")
 expectEqual(RemoteShellPath.changeDirectoryCommand(for: "-dash"), #"cd ./'-dash'"#, "dash-prefixed relative path is not treated as an option")
+
+let webInner = RemoteShellPath.changeDirectoryCommand(for: "/var/www/app") + " && exec bash -i"
+let webB64 = Data(webInner.utf8).base64EncodedString()
+let webRemote = "bash -lc \"$(printf %s \(posixSingleQuotedForTest(webB64)) | base64 -d)\""
+let webExpected =
+    "ssh -t -- \(posixSingleQuotedForTest("web")) \(posixSingleQuotedForTest(webRemote))"
+expectEqual(
+    PorterSSHInteractiveCommand.localShellInvocation(hostAlias: "web", remotePath: "/var/www/app"),
+    webExpected,
+    "ssh invocation uses base64-wrapped remote script for paths with quotes"
+)
+
+let edgeInner = RemoteShellPath.changeDirectoryCommand(for: "~/two words/it's") + " && exec bash -i"
+let edgeB64 = Data(edgeInner.utf8).base64EncodedString()
+let edgeRemote = "bash -lc \"$(printf %s \(posixSingleQuotedForTest(edgeB64)) | base64 -d)\""
+let edgeExpected =
+    "ssh -t -- \(posixSingleQuotedForTest("edge-host")) \(posixSingleQuotedForTest(edgeRemote))"
+expectEqual(
+    PorterSSHInteractiveCommand.localShellInvocation(hostAlias: "edge-host", remotePath: "~/two words/it's"),
+    edgeExpected,
+    "ssh invocation base64-wraps home-relative cd with embedded quotes"
+)
 
 expectEqual(
     RemoteShellPath.moveItemShellCommand(from: "/tmp/a b", to: "/tmp/c'd"),

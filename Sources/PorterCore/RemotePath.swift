@@ -38,6 +38,29 @@ public enum RemoteShellPath {
     }
 }
 
+/// Local shell command to start an interactive remote shell after a safe ``RemoteShellPath`` `cd`.
+///
+/// The remote side runs `bash -lc "$(printf %s … | base64 -d)"` so the payload can contain single quotes from
+/// ``RemoteShellPath/changeDirectoryCommand(for:)`` without nested quoting issues. Using a pipe into `bash` stdin
+/// causes `exec bash` to exit immediately when SSH closes the pipe. Requires `base64` and `bash` on the server.
+public enum PorterSSHInteractiveCommand {
+    public static func localShellInvocation(hostAlias: String, remotePath: String) -> String {
+        let trimmed = remotePath.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cdLine = RemoteShellPath.changeDirectoryCommand(for: trimmed)
+        let innerShell = cdLine + " && exec bash -i"
+        guard let data = innerShell.data(using: .utf8) else {
+            return "ssh -t -- \(posixSingleQuoted(hostAlias))"
+        }
+        let encoded = data.base64EncodedString()
+        let remoteCommand = "bash -lc \"$(printf %s \(posixSingleQuoted(encoded)) | base64 -d)\""
+        return "ssh -t -- \(posixSingleQuoted(hostAlias)) \(posixSingleQuoted(remoteCommand))"
+    }
+
+    private static func posixSingleQuoted(_ value: String) -> String {
+        "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    }
+}
+
 public enum RemotePathCodec {
     public static func split(_ raw: String) -> [String] {
         let t = raw.trimmingCharacters(in: .whitespacesAndNewlines)
