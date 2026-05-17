@@ -3,58 +3,67 @@
 <!-- AGENTS-MD-SYNC:START -->
 ## Agent 工作约定（自动维护）
 
-- 最近生成时间（UTC）：`2026-05-13 00:00:00Z`
+- 最近生成时间（UTC）：`2026-05-17 13:49:18Z`
 - 生成脚本：`agents-md-sync/scripts/sync_agents_md.py`
-- 官方参考：[agents.md](https://agents.md/)、[agentsmd/agents.md](https://github.com/agentsmd/agents.md)
+- 官方参考：`https://agents.md/`，`https://github.com/agentsmd/agents.md`
 
 ### 项目概览
-
 - 项目名称：`porter`
-- 技术栈：SwiftPM，macOS SwiftUI 可执行目标 `Porter`，校验入口 `PorterPathValidation`
-- 仓库布局：`Sources/`（`PorterApp`、`PorterCore`、`PorterPathValidation`），无顶层 `Tests` 目标时请依赖 `PorterPathValidation` 做快速回归
+- 检测到的技术栈：`Unknown/Custom`
+- 检测到的工作区包数量：`0`
+- 仓库结构提示：`Assets, Packaging, Scripts, Sources, Tests, design-package`
 
 ### 指令优先级
-
 - 用户在对话中的明确指令优先于本文件。
-- 就近的嵌套 `AGENTS.md`（若未来添加）优先于根级。
-- 与 README 冲突时，以用户在对话中的指令为准；否则 README 可作产品面向的补充说明。
+- 处理局部目录时，优先遵循目录树中最近的 `AGENTS.md`。
+- README 和贡献文档作为补充上下文；如有冲突，以更高优先级指令为准。
 
-### 开发环境与调试
-
-- 默认在仓库根目录执行命令。
-- 入口：`Sources/PorterApp/PorterApp.swift`。
-- 远端路径：`Sources/PorterCore/RemotePath.swift`。
-- 上传下载：`Sources/PorterCore/PorterSFTPBatch.swift`（`/usr/bin/sftp -b`，`BatchMode`）；远端 shell 仍为 `/usr/bin/ssh`。
-- 调试连接问题时优先用本机 `~/.ssh/config` 与终端里同 Host 的 `ssh` / `sftp` 对照。
+### 开发环境提示
+- 除非下方命令另有说明，默认在当前适用范围根目录执行命令。
+- Swift Package Manager 管理的 macOS SwiftUI 应用；入口 `Sources/PorterApp/PorterApp.swift`，共享逻辑在 `Sources/PorterCore/`。
+- 远端浏览与 shell 操作用 `/usr/bin/ssh`（`PorterSSH.swift`）；上传/下载用 `/usr/bin/sftp -b` 批处理（`PorterSFTPBatch.swift`，`BatchMode=yes`）。
+- 路径拼接、远端 `cd` 引号与 SFTP 转义：`Sources/PorterCore/RemotePath.swift`；快速回归 `swift run PorterPathValidation`。
+- 改 UI 前阅读 `design-package/DESIGN.md`；连接问题用本机 `~/.ssh/config` 与同 Host 的 `ssh` / `sftp` 对照。
+- 发布 DMG：`Scripts/package-dmg.sh`（release 构建 + `.app` + 磁盘映像，产物在 `dist/`）。
 
 ### 常用命令
+- 除非特别说明，以下命令都在当前适用范围根目录执行。
+- dev: `swift run Porter`
+- build: `swift build`
+- test: `swift run PorterPathValidation`
 
-- dev：`swift run Porter`
-- build：`swift build`
-- regression：`swift run PorterPathValidation`
+### 测试说明
+- 针对本次修改的文件运行最相关的检查。
+- 修复由本次修改引入的测试、类型、lint 和格式化失败。
+- 行为发生变化时，补充或更新测试。
 
-### 测试与变更
+### 代码风格
+- 遵循所编辑文件的既有代码风格。
+- 修改范围保持聚焦，避免无关重写或大范围格式化噪音。
+- 遵循现有 SwiftUI 与 `@MainActor` 状态管理写法，保持 UI 状态更新在主 actor 上。
+- 修改 SSH 配置解析、远端路径、SFTP 批处理脚本、shell 转义或 AppleScript 拼接时，优先在 `PorterPathValidation` 补充边界断言。
 
-- 改动路径拼接、远端 `cd` 引号、SFTP batch 路径转义或 SSH 解析时，运行 `swift run PorterPathValidation` 并酌情补充断言。
-- 修复本次改动引入的编译与校验失败。
-- UI 保持在 `@MainActor` 上与现有 SwiftUI 状态风格一致。
+### 安全注意事项
+- 不提交密钥、令牌、凭据或本地环境文件。
+- 在信任边界校验输入，并保留既有鉴权检查。
+- 不要提交真实主机名、私钥路径、用户名、远程目录或其他个人 SSH 配置。
+- 涉及 `ssh`/`sftp` 参数、`sftp -b` 脚本、远端路径、shell 引号或 AppleScript 拼接时，必须避免命令注入。
 
-### 代码与安全
+### 约束规则
+- 优先遵循用户指令，其次遵循离当前目录最近的 AGENTS.md 规则。
+- 修改范围保持聚焦，避免顺手做无关重构。
+- 避免直接编辑生成物或依赖目录：`node_modules, dist, build, .git, .build, .swiftpm, DerivedData`
+- 行为发生变化时，补充或更新测试。
+- 当子目录工作流明显分化时，再补充嵌套的 AGENTS.md。
 
-- 不提交密钥、令牌、真实个人 SSH 片段或 `.env` 类机密。
-- 信任边界校验用户与配置输入；不因「方便调试」绕过鉴权语义。
-- 涉及 `ssh`/`sftp` 参数、`sftp -b` 脚本内容、远端路径、shell 引号或 AppleScript 拼接时，必须避免命令注入。
+### PR / 交付说明
+- 交付前说明行为变化、已执行验证和已知缺口。
+- 说明行为变更、已知限制，以及是否已运行 `swift build` / `swift run PorterPathValidation` 与未运行原因。
 
-### 仓库约束
-
-- 勿编辑生成产物目录：`node_modules`、`dist`、`build`、`.git`、`.build`、`.swiftpm`、`DerivedData`。
-- 改动保持最小必要范围，避免无关大段格式化。
-- 子目录若日后出现独立构建流程，再考虑嵌套 `AGENTS.md`。
-
-### 交付（PR / 代理任务）
-
-- 说明行为变更、已知限制与已执行的验证命令。
-- 明确写出是否已运行 `swift build` / `PorterPathValidation` 以及未运行的原因。
+### 验证清单
+- 交付前运行最相关的 build/typecheck/test/lint/format 命令；如果没有标准命令，就执行最接近的可用验证步骤。
+- 明确说明已验证和未验证的内容。
+- 涉及上传、下载、远端浏览、重命名/删除或命令构造时，检查空格、引号、波浪线、通配符与 shell 元字符场景。
 <!-- AGENTS-MD-SYNC:END -->
 
 ---

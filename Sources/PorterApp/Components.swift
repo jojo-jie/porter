@@ -385,6 +385,177 @@ private struct PorterPointingHandCursorModifier: ViewModifier {
     }
 }
 
+/// Remote directory row actions — grouped capsule toolbar (see DESIGN.md).
+enum PorterListingActionKind: CaseIterable {
+    case edit
+    case download
+    case rename
+    case delete
+
+    var symbolName: String {
+        switch self {
+        case .edit: "square.and.pencil"
+        case .download: "arrow.down.circle"
+        case .rename: "pencil.line"
+        case .delete: "trash"
+        }
+    }
+
+    var help: String {
+        switch self {
+        case .edit: "在本机默认应用中打开；保存后自动上传"
+        case .download: "下载到本地目录"
+        case .rename: "重命名远端文件或文件夹"
+        case .delete: "删除远端文件或文件夹"
+        }
+    }
+
+    var accessibilityVerb: String {
+        switch self {
+        case .edit: "编辑"
+        case .download: "下载"
+        case .rename: "重命名"
+        case .delete: "删除"
+        }
+    }
+
+    fileprivate var isDestructive: Bool { self == .delete }
+}
+
+/// Hover-revealed action strip for a remote listing row.
+struct PorterListingActionStrip: View {
+    let entryName: String
+    let showsEdit: Bool
+    let isDownloading: Bool
+    let isEditing: Bool
+    let isRenaming: Bool
+    let isDeleting: Bool
+    let isDisabled: Bool
+    let onEdit: () -> Void
+    let onDownload: () -> Void
+    let onRename: () -> Void
+    let onDelete: () -> Void
+
+    private var visibleKinds: [PorterListingActionKind] {
+        var kinds: [PorterListingActionKind] = []
+        if showsEdit { kinds.append(.edit) }
+        kinds.append(contentsOf: [.download, .rename, .delete])
+        return kinds
+    }
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(Array(visibleKinds.enumerated()), id: \.offset) { index, kind in
+                if index > 0 {
+                    PorterListingActionDivider(isEmphasized: kind.isDestructive)
+                }
+                PorterListingActionCell(
+                    kind: kind,
+                    entryName: entryName,
+                    isBusy: busy(for: kind),
+                    isDisabled: isDisabled,
+                    action: action(for: kind)
+                )
+            }
+        }
+        .padding(.horizontal, 3)
+        .padding(.vertical, 2)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Color.porterSurface.opacity(0.94))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(Color.porterBorder, lineWidth: 1)
+        )
+        .fixedSize()
+    }
+
+    private func busy(for kind: PorterListingActionKind) -> Bool {
+        switch kind {
+        case .edit: isEditing
+        case .download: isDownloading
+        case .rename: isRenaming
+        case .delete: isDeleting
+        }
+    }
+
+    private func action(for kind: PorterListingActionKind) -> () -> Void {
+        switch kind {
+        case .edit: onEdit
+        case .download: onDownload
+        case .rename: onRename
+        case .delete: onDelete
+        }
+    }
+}
+
+private struct PorterListingActionDivider: View {
+    var isEmphasized: Bool = false
+
+    var body: some View {
+        Rectangle()
+            .fill(isEmphasized ? Color.red.opacity(0.18) : Color.porterBorder)
+            .frame(width: 1, height: 18)
+            .padding(.horizontal, 1)
+    }
+}
+
+private struct PorterListingActionCell: View {
+    let kind: PorterListingActionKind
+    let entryName: String
+    let isBusy: Bool
+    let isDisabled: Bool
+    let action: () -> Void
+
+    @State private var isHovering = false
+
+    private var iconColor: Color {
+        if kind.isDestructive {
+            return isHovering ? Color.red.opacity(0.92) : Color.secondary.opacity(0.72)
+        }
+        if isHovering {
+            return Color.porterAccent
+        }
+        return Color.secondary.opacity(0.88)
+    }
+
+    private var cellFill: Color {
+        if kind.isDestructive {
+            return isHovering ? Color.red.opacity(0.12) : Color.clear
+        }
+        return isHovering ? Color.porterAccent.opacity(0.10) : Color.clear
+    }
+
+    var body: some View {
+        Button(action: action) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(cellFill)
+                if isBusy {
+                    ProgressView()
+                        .controlSize(.small)
+                        .scaleEffect(0.58)
+                } else {
+                    Image(systemName: kind.symbolName)
+                        .font(.system(size: 13, weight: .medium))
+                        .symbolRenderingMode(.monochrome)
+                        .foregroundStyle(iconColor)
+                }
+            }
+            .frame(width: 30, height: 28)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(kind.help)
+        .accessibilityLabel("\(kind.accessibilityVerb) \(entryName)")
+        .disabled(isDisabled)
+        .porterPointingHandCursor(!isDisabled)
+        .onHover { isHovering = $0 }
+        .animation(.easeOut(duration: 0.12), value: isHovering)
+    }
+}
+
 private struct PorterCursorArea: NSViewRepresentable {
     let cursor: NSCursor
 

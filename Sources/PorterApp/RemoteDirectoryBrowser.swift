@@ -381,16 +381,19 @@ private struct RemoteListingRow: View, Equatable {
     let isSelected: Bool
     let isHovered: Bool
     let isDownloading: Bool
+    let isEditing: Bool
     let isRenaming: Bool
     let isDeleting: Bool
+    let showsEditAction: Bool
     let onRowTap: () -> Void
     let onHoverChange: (Bool) -> Void
     let onDownload: () -> Void
+    let onEdit: () -> Void
     let onRename: () -> Void
     let onDelete: () -> Void
 
     private var isBusy: Bool {
-        isDownloading || isRenaming || isDeleting
+        isDownloading || isEditing || isRenaming || isDeleting
     }
 
     private var isHighlighted: Bool {
@@ -408,14 +411,24 @@ private struct RemoteListingRow: View, Equatable {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .onTapGesture(perform: onRowTap)
 
-            HStack(spacing: 6) {
+            Group {
                 if shouldShowActions {
-                    downloadButton
-                    renameButton
-                    deleteButton
+                    PorterListingActionStrip(
+                        entryName: entry.name,
+                        showsEdit: showsEditAction,
+                        isDownloading: isDownloading,
+                        isEditing: isEditing,
+                        isRenaming: isRenaming,
+                        isDeleting: isDeleting,
+                        isDisabled: isBusy,
+                        onEdit: onEdit,
+                        onDownload: onDownload,
+                        onRename: onRename,
+                        onDelete: onDelete
+                    )
                 }
             }
-            .frame(width: 118, alignment: .center)
+            .frame(width: showsEditAction ? 148 : 118, alignment: .center)
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 5)
@@ -474,75 +487,21 @@ private struct RemoteListingRow: View, Equatable {
         }
     }
 
-    private var downloadButton: some View {
-        Button(action: onDownload) {
-            if isDownloading {
-                ProgressView()
-                    .controlSize(.small)
-                    .scaleEffect(0.65)
-            } else {
-                Image(systemName: "arrow.down.circle")
-                    .imageScale(.medium)
-            }
-        }
-        .buttonStyle(.plain)
-        .foregroundStyle(Color.porterAccent)
-        .help("下载到本地目录")
-        .accessibilityLabel("下载 \(entry.name)")
-        .disabled(isBusy)
-        .porterPointingHandCursor(!isBusy)
-    }
-
-    private var renameButton: some View {
-        Button(action: onRename) {
-            if isRenaming {
-                ProgressView()
-                    .controlSize(.small)
-                    .scaleEffect(0.65)
-            } else {
-                Image(systemName: "pencil.line")
-                    .imageScale(.medium)
-            }
-        }
-        .buttonStyle(.plain)
-        .foregroundStyle(Color.porterAccent)
-        .help("重命名远端文件或文件夹")
-        .accessibilityLabel("重命名 \(entry.name)")
-        .disabled(isBusy)
-        .porterPointingHandCursor(!isBusy)
-    }
-
-    private var deleteButton: some View {
-        Button(action: onDelete) {
-            if isDeleting {
-                ProgressView()
-                    .controlSize(.small)
-                    .scaleEffect(0.65)
-            } else {
-                Image(systemName: "trash")
-                    .imageScale(.medium)
-            }
-        }
-        .buttonStyle(.plain)
-        .foregroundStyle(Color.red.opacity(0.88))
-        .help("删除远端文件或文件夹")
-        .accessibilityLabel("删除 \(entry.name)")
-        .disabled(isBusy)
-        .porterPointingHandCursor(!isBusy)
-    }
-
     nonisolated static func == (lhs: RemoteListingRow, rhs: RemoteListingRow) -> Bool {
         lhs.entry == rhs.entry
             && lhs.isSelected == rhs.isSelected
             && lhs.isHovered == rhs.isHovered
             && lhs.isDownloading == rhs.isDownloading
+            && lhs.isEditing == rhs.isEditing
             && lhs.isRenaming == rhs.isRenaming
             && lhs.isDeleting == rhs.isDeleting
+            && lhs.showsEditAction == rhs.showsEditAction
     }
 }
 
 private struct RemoteDirectoryBrowserSheet: View {
     @EnvironmentObject private var downloadPreferences: DownloadPreferencesStore
+    @EnvironmentObject private var remoteFileEditCoordinator: RemoteFileEditCoordinator
     @ObservedObject var browser: RemoteDirectoryBrowserModel
     @Binding var boundPath: String
     let onDismiss: () -> Void
@@ -617,6 +576,15 @@ private struct RemoteDirectoryBrowserSheet: View {
         .background(Color.porterCanvas)
         .animation(.easeOut(duration: 0.16), value: pendingRenamePrompt?.id)
         .animation(.easeOut(duration: 0.16), value: pendingDeleteConfirmation?.id)
+        .onReceive(NotificationCenter.default.publisher(for: .porterRemoteEditSyncFailed)) { notification in
+            let name = notification.userInfo?["fileName"] as? String ?? "文件"
+            let detail = notification.userInfo?["message"] as? String ?? "上传失败"
+            footerStatusMessage = "编辑同步失败：\(name)\n\(detail)"
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .porterRemoteEditSyncSucceeded)) { notification in
+            let detail = notification.userInfo?["message"] as? String
+            footerStatusMessage = detail ?? "已同步到远端"
+        }
         .task {
             await browser.refreshList()
         }
@@ -849,7 +817,7 @@ private struct RemoteDirectoryBrowserSheet: View {
             Text("类型")
                 .frame(width: 72, alignment: .leading)
             Text("操作")
-                .frame(width: 118, alignment: .center)
+                .frame(width: 156, alignment: .center)
         }
         .font(.system(.caption2).weight(.semibold))
         .foregroundStyle(.tertiary)
@@ -861,13 +829,16 @@ private struct RemoteDirectoryBrowserSheet: View {
     }
 
     private func listingRow(_ entry: RemoteListingEntry) -> some View {
-        RemoteListingRow(
+        let remotePath = browser.remotePath(for: entry)
+        return RemoteListingRow(
             entry: entry,
             isSelected: selectedName == entry.name,
             isHovered: hoveredName == entry.name,
             isDownloading: downloadingNames.contains(entry.name),
+            isEditing: remoteFileEditCoordinator.isBusy(host: browser.hostAlias, remotePath: remotePath),
             isRenaming: renamingNames.contains(entry.name),
             isDeleting: deletingNames.contains(entry.name),
+            showsEditAction: showsEditAction(for: entry),
             onRowTap: {
                 handleListingRowTap(entry)
             },
@@ -879,6 +850,9 @@ private struct RemoteDirectoryBrowserSheet: View {
             onDownload: {
                 chooseDestinationAndDownload(entry)
             },
+            onEdit: {
+                beginRemoteEdit(entry)
+            },
             onRename: {
                 beginRename(entry)
             },
@@ -887,6 +861,10 @@ private struct RemoteDirectoryBrowserSheet: View {
             }
         )
         .equatable()
+    }
+
+    private func showsEditAction(for entry: RemoteListingEntry) -> Bool {
+        entry.name != ".." && !entry.isDirectory
     }
 
     private func selectListingEntry(_ entry: RemoteListingEntry) {
@@ -921,8 +899,31 @@ private struct RemoteDirectoryBrowserSheet: View {
         withTransaction(transaction, updates)
     }
 
+    private func beginRemoteEdit(_ entry: RemoteListingEntry) {
+        guard showsEditAction(for: entry) else { return }
+        let remotePath = browser.remotePath(for: entry)
+        guard !downloadingNames.contains(entry.name),
+              !renamingNames.contains(entry.name),
+              !deletingNames.contains(entry.name),
+              !remoteFileEditCoordinator.isBusy(host: browser.hostAlias, remotePath: remotePath)
+        else { return }
+
+        footerStatusMessage = "正在准备编辑：\(entry.name)…"
+
+        Task {
+            let result = await remoteFileEditCoordinator.beginEdit(
+                host: browser.hostAlias,
+                remotePath: remotePath,
+                fileName: entry.name
+            )
+            footerStatusMessage = result
+        }
+    }
+
     private func chooseDestinationAndDownload(_ entry: RemoteListingEntry) {
         guard !downloadingNames.contains(entry.name), !deletingNames.contains(entry.name) else { return }
+        let remotePath = browser.remotePath(for: entry)
+        guard !remoteFileEditCoordinator.isBusy(host: browser.hostAlias, remotePath: remotePath) else { return }
 
         let destination: URL
         if let defaultDirectory = downloadPreferences.resolvedDirectoryURL {
@@ -944,7 +945,6 @@ private struct RemoteDirectoryBrowserSheet: View {
             destination = chosen
         }
 
-        let remotePath = browser.remotePath(for: entry)
         downloadingNames.insert(entry.name)
         footerStatusMessage = "正在下载：\(entry.name)"
 
@@ -961,7 +961,12 @@ private struct RemoteDirectoryBrowserSheet: View {
     }
 
     private func beginRename(_ entry: RemoteListingEntry) {
-        guard !renamingNames.contains(entry.name), !downloadingNames.contains(entry.name), !deletingNames.contains(entry.name) else { return }
+        let remotePath = browser.remotePath(for: entry)
+        guard !renamingNames.contains(entry.name),
+              !downloadingNames.contains(entry.name),
+              !deletingNames.contains(entry.name),
+              !remoteFileEditCoordinator.isBusy(host: browser.hostAlias, remotePath: remotePath)
+        else { return }
 
         renameDraftName = entry.name
         renamePromptErrorText = nil

@@ -11,29 +11,32 @@
     "format": null
   },
   "dev_environment_tips": [
-    "这是一个 Swift Package Manager 管理的 macOS SwiftUI 工具，入口在 `Sources/PorterApp/PorterApp.swift`。",
-    "共享路径处理逻辑在 `Sources/PorterCore/RemotePath.swift`，可通过 `swift run PorterPathValidation` 做快速边界校验。",
-    "本应用读取本机 `~/.ssh/config` 并调用系统 `/usr/bin/ssh` 与 `/usr/bin/scp`，调试远端浏览、上传或下载行为时优先使用本机 SSH 配置验证。"
+    "Swift Package Manager 管理的 macOS SwiftUI 应用；入口 `Sources/PorterApp/PorterApp.swift`，共享逻辑在 `Sources/PorterCore/`。",
+    "远端浏览与 shell 操作用 `/usr/bin/ssh`（`PorterSSH.swift`）；上传/下载用 `/usr/bin/sftp -b` 批处理（`PorterSFTPBatch.swift`，`BatchMode=yes`）。",
+    "路径拼接、远端 `cd` 引号与 SFTP 转义：`Sources/PorterCore/RemotePath.swift`；快速回归 `swift run PorterPathValidation`。",
+    "改 UI 前阅读 `design-package/DESIGN.md`；连接问题用本机 `~/.ssh/config` 与同 Host 的 `ssh` / `sftp` 对照。",
+    "发布 DMG：`Scripts/package-dmg.sh`（release 构建 + `.app` + 磁盘映像，产物在 `dist/`）。"
   ],
   "code_style_guidelines": [
     "遵循现有 SwiftUI 与 `@MainActor` 状态管理写法，保持 UI 状态更新在主 actor 上。",
-    "修改 SSH 配置解析、远端路径处理、shell 转义或 AppleScript 拼接逻辑时，优先补充边界案例验证。"
+    "修改 SSH 配置解析、远端路径、SFTP 批处理脚本、shell 转义或 AppleScript 拼接时，优先在 `PorterPathValidation` 补充边界断言。"
   ],
   "security_notes": [
     "不要提交真实主机名、私钥路径、用户名、远程目录或其他个人 SSH 配置。",
-    "涉及 `scp` 参数、远程路径、shell 转义、AppleScript 命令拼接时，必须避免引入命令注入风险。"
+    "涉及 `ssh`/`sftp` 参数、`sftp -b` 脚本、远端路径、shell 引号或 AppleScript 拼接时，必须避免命令注入。"
   ],
   "pr_instructions": [
-    "交接时说明是否运行了 `swift build`，以及未运行的验证项和原因。"
+    "说明行为变更、已知限制，以及是否已运行 `swift build` / `swift run PorterPathValidation` 与未运行原因。"
   ],
   "extra_checks": [
-    "涉及上传、下载、远端浏览路径或命令构造时，检查空格、引号、波浪线、通配符和 shell 元字符场景。"
+    "涉及上传、下载、远端浏览、重命名/删除或命令构造时，检查空格、引号、波浪线、通配符与 shell 元字符场景。"
   ],
   "blocked_paths": [
     ".build",
     ".swiftpm",
     ".git",
-    "DerivedData"
+    "DerivedData",
+    "dist"
   ],
   "manual_notes_template": [
     "在这里补充不会被同步脚本覆盖的项目特定说明。"

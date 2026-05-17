@@ -8,6 +8,7 @@ struct PorterApp: App {
     @StateObject private var uploadPreferences = UploadPreferencesStore()
     @StateObject private var downloadPreferences = DownloadPreferencesStore()
     @StateObject private var sshConfigPreferences = SSHConfigPreferencesStore()
+    @StateObject private var remoteFileEditCoordinator = RemoteFileEditCoordinator()
 
     init() {
         // 从 swift run / 终端直接启动裸可执行文件时，默认可能不注册为“普通应用”，
@@ -23,6 +24,7 @@ struct PorterApp: App {
                 .environmentObject(uploadPreferences)
                 .environmentObject(downloadPreferences)
                 .environmentObject(sshConfigPreferences)
+                .environmentObject(remoteFileEditCoordinator)
                 .onAppear {
                     NSApplication.shared.activate(ignoringOtherApps: true)
                 }
