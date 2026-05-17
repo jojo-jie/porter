@@ -59,6 +59,18 @@ expectEqual(
     "remove directory command quotes path and uses --"
 )
 
+expectEqual(
+    RemoteShellPath.createDirectoryShellCommand(path: "/tmp/a b"),
+    "if test -e -- '/tmp/a b'; then exit 2; fi\nmkdir -p -- '/tmp/a b'",
+    "create directory probes existence and quotes path"
+)
+
+expectEqual(
+    RemoteShellPath.createEmptyFileShellCommand(path: "~/new file"),
+    "if test -e -- \"$HOME\"/'new file'; then exit 2; fi\ntouch -- \"$HOME\"/'new file'",
+    "create empty file probes home-relative path and quotes tail"
+)
+
 expectEqual(RemotePathCodec.split(""), ["~"], "empty input splits to home")
 expectEqual(RemotePathCodec.split("~"), ["~"], "tilde splits to home")
 expectEqual(RemotePathCodec.split("~/uploads"), ["~", "uploads"], "home-relative input splits into components")

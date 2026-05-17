@@ -33,6 +33,24 @@ public enum RemoteShellPath {
         return "rm -f -- \(remoteSingleQuoted(path))"
     }
 
+    /// POSIX `sh` snippet: create a directory when the path does not already exist (`mkdir -p`).
+    public static func createDirectoryShellCommand(path: String) -> String {
+        let target = remotePathShellArgument(for: path)
+        return """
+        if test -e -- \(target); then exit 2; fi
+        mkdir -p -- \(target)
+        """
+    }
+
+    /// POSIX `sh` snippet: create an empty file when the path does not already exist (`touch`).
+    public static func createEmptyFileShellCommand(path: String) -> String {
+        let target = remotePathShellArgument(for: path)
+        return """
+        if test -e -- \(target); then exit 2; fi
+        touch -- \(target)
+        """
+    }
+
     static func remoteSingleQuoted(_ value: String) -> String {
         "'" + value.replacingOccurrences(of: "'", with: "'\"'\"'") + "'"
     }
@@ -114,20 +132,25 @@ public enum RemotePathCodec {
 }
 
 extension RemoteShellPath {
-    /// POSIX `test -e` for a remote path, with the same `~` / quoting rules as ``changeDirectoryCommand(for:)``.
-    public static func itemExistsTestLine(for path: String) -> String {
+    /// Shell argument for a remote path, with the same `~` / quoting rules as ``changeDirectoryCommand(for:)``.
+    static func remotePathShellArgument(for path: String) -> String {
         let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
         let normalized = trimmed.isEmpty ? "~" : trimmed
         if normalized == "~" || normalized == "~/" {
-            return "test -e -- \"$HOME\""
+            return "\"$HOME\""
         }
         if normalized.hasPrefix("~/") {
             let tail = String(normalized.dropFirst(2))
-            return "test -e -- \"$HOME\"/\(remoteSingleQuoted(tail))"
+            return "\"$HOME\"/\(remoteSingleQuoted(tail))"
         }
         if normalized.hasPrefix("-") {
-            return "test -e -- ./\(remoteSingleQuoted(normalized))"
+            return "./\(remoteSingleQuoted(normalized))"
         }
-        return "test -e -- \(remoteSingleQuoted(normalized))"
+        return remoteSingleQuoted(normalized)
+    }
+
+    /// POSIX `test -e` for a remote path, with the same `~` / quoting rules as ``changeDirectoryCommand(for:)``.
+    public static func itemExistsTestLine(for path: String) -> String {
+        "test -e -- \(remotePathShellArgument(for: path))"
     }
 }

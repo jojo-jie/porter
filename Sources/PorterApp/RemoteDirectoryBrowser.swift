@@ -516,6 +516,16 @@ private struct RemoteDirectoryBrowserSheet: View {
         let entry: RemoteListingEntry
     }
 
+    private enum NewItemKind {
+        case folder
+        case file
+    }
+
+    private struct NewItemPrompt: Identifiable {
+        let id = UUID()
+        let kind: NewItemKind
+    }
+
     @State private var selectedName: String?
     @State private var filterText = ""
     @State private var listRefreshSpin = 0
@@ -527,11 +537,17 @@ private struct RemoteDirectoryBrowserSheet: View {
     @State private var footerStatusMessage: String?
     @State private var pendingRenamePrompt: RenamePrompt?
     @State private var pendingDeleteConfirmation: DeleteConfirmation?
+    @State private var pendingNewItemPrompt: NewItemPrompt?
     @State private var renameDraftName = ""
+    @State private var newItemDraftName = ""
     /// Inline validation under the rename field (non-nil → red caption).
     @State private var renamePromptErrorText: String?
+    @State private var newItemPromptErrorText: String?
     @State private var renameCardShakePhase: CGFloat = 0
+    @State private var newItemCardShakePhase: CGFloat = 0
+    @State private var isCreatingNewItem = false
     @FocusState private var isRenamePromptFocused: Bool
+    @FocusState private var isNewItemPromptFocused: Bool
 
     var body: some View {
         ZStack {
@@ -571,11 +587,17 @@ private struct RemoteDirectoryBrowserSheet: View {
                 deleteConfirmationOverlay(pendingDeleteConfirmation)
                     .transition(.opacity.combined(with: .scale(scale: 0.98)))
             }
+
+            if let pendingNewItemPrompt {
+                newItemPromptOverlay(pendingNewItemPrompt)
+                    .transition(.opacity.combined(with: .scale(scale: 0.98)))
+            }
         }
         .frame(width: 680, height: 520)
         .background(Color.porterCanvas)
         .animation(.easeOut(duration: 0.16), value: pendingRenamePrompt?.id)
         .animation(.easeOut(duration: 0.16), value: pendingDeleteConfirmation?.id)
+        .animation(.easeOut(duration: 0.16), value: pendingNewItemPrompt?.id)
         .onReceive(NotificationCenter.default.publisher(for: .porterRemoteEditSyncFailed)) { notification in
             let name = notification.userInfo?["fileName"] as? String ?? "文件"
             let detail = notification.userInfo?["message"] as? String ?? "上传失败"
@@ -595,6 +617,10 @@ private struct RemoteDirectoryBrowserSheet: View {
         .onChange(of: pendingRenamePrompt?.id) { _, _ in
             renamePromptErrorText = nil
             renameCardShakePhase = 0
+        }
+        .onChange(of: pendingNewItemPrompt?.id) { _, _ in
+            newItemPromptErrorText = nil
+            newItemCardShakePhase = 0
         }
     }
 
@@ -717,6 +743,22 @@ private struct RemoteDirectoryBrowserSheet: View {
                     .strokeBorder(Color.porterBorder, lineWidth: 1)
             )
 
+            filterToolbarIconButton(
+                systemName: "folder.badge.plus",
+                help: "在当前远端目录新建文件夹",
+                accessibilityLabel: "新建文件夹"
+            ) {
+                beginNewItem(.folder)
+            }
+
+            filterToolbarIconButton(
+                systemName: "doc.badge.plus",
+                help: "在当前远端目录新建空文件",
+                accessibilityLabel: "新建空文件"
+            ) {
+                beginNewItem(.file)
+            }
+
             Button {
                 withAnimation(.spring(response: 0.45, dampingFraction: 0.75)) {
                     listRefreshSpin += 1
@@ -743,6 +785,38 @@ private struct RemoteDirectoryBrowserSheet: View {
             .disabled(browser.isLoading)
             .porterPointingHandCursor(!browser.isLoading)
         }
+    }
+
+    private var canMutateCurrentDirectory: Bool {
+        !browser.isLoading && browser.errorMessage == nil && !isCreatingNewItem
+    }
+
+    @ViewBuilder
+    private func filterToolbarIconButton(
+        systemName: String,
+        help: String,
+        accessibilityLabel: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .imageScale(.medium)
+                .frame(width: 32, height: 32)
+                .background(
+                    Circle()
+                        .fill(Color.porterSurface.opacity(0.9))
+                )
+                .overlay(
+                    Circle()
+                        .strokeBorder(Color.porterBorder, lineWidth: 1)
+                )
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(Color.porterAccent)
+        .help(help)
+        .accessibilityLabel(accessibilityLabel)
+        .disabled(!canMutateCurrentDirectory)
+        .porterPointingHandCursor(canMutateCurrentDirectory)
     }
 
     private var displayedEntries: [RemoteListingEntry] {
@@ -960,6 +1034,102 @@ private struct RemoteDirectoryBrowserSheet: View {
         }
     }
 
+    private func beginNewItem(_ kind: NewItemKind) {
+        guard canMutateCurrentDirectory else { return }
+        newItemDraftName = ""
+        newItemPromptErrorText = nil
+        newItemCardShakePhase = 0
+        pendingNewItemPrompt = NewItemPrompt(kind: kind)
+    }
+
+    private func continueNewItemPrompt(_ prompt: NewItemPrompt) {
+        if let issue = RemoteFileNameValidation.validatePortableFileName(newItemDraftName) {
+            presentNewItemValidationFailure(renameValidationMessage(for: issue))
+            return
+        }
+        let name = newItemDraftName.trimmingCharacters(in: .whitespacesAndNewlines)
+        newItemPromptErrorText = nil
+        pendingNewItemPrompt = nil
+        newItemDraftName = ""
+        performCreateNewItem(name: name, kind: prompt.kind)
+    }
+
+    private func presentNewItemValidationFailure(_ message: String) {
+        newItemPromptErrorText = message
+        triggerNewItemCardShake()
+        footerStatusMessage = nil
+    }
+
+    private func triggerNewItemCardShake() {
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            newItemCardShakePhase = 0
+        }
+        withAnimation(.easeOut(duration: 0.42)) {
+            newItemCardShakePhase = 1
+        }
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(0.44))
+            var done = Transaction()
+            done.disablesAnimations = true
+            withTransaction(done) {
+                newItemCardShakePhase = 0
+            }
+        }
+    }
+
+    private func cancelNewItemPrompt() {
+        pendingNewItemPrompt = nil
+        newItemDraftName = ""
+        newItemPromptErrorText = nil
+    }
+
+    private func performCreateNewItem(name: String, kind: NewItemKind) {
+        let remotePath = browser.remotePathInCurrentDirectory(named: name)
+        let commandLine: String =
+            switch kind {
+            case .folder:
+                RemoteShellPath.createDirectoryShellCommand(path: remotePath)
+            case .file:
+                RemoteShellPath.createEmptyFileShellCommand(path: remotePath)
+            }
+        let bash = """
+        set -e
+        \(commandLine)
+        """
+        let host = browser.hostAlias
+        let kindLabel = kind == .folder ? "文件夹" : "空文件"
+
+        isCreatingNewItem = true
+        footerStatusMessage = "正在新建\(kindLabel)：\(name)…"
+
+        Task {
+            let (exitCode, output) = await Task.detached(priority: .userInitiated) {
+                RemoteSSH.run(host: host, bash: bash)
+            }.value
+            isCreatingNewItem = false
+            if exitCode == 0 {
+                footerStatusMessage = "已新建\(kindLabel)：\(name)"
+                selectedName = name
+                await browser.refreshList()
+            } else if exitCode == 2 {
+                footerStatusMessage = "无法新建：「\(name)」已存在于当前目录。"
+            } else {
+                let tail = output
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .replacingOccurrences(of: "\r\n", with: "\n")
+                let snippet =
+                    tail.split(separator: "\n", omittingEmptySubsequences: false)
+                        .prefix(4)
+                        .joined(separator: "\n")
+                footerStatusMessage = snippet.isEmpty
+                    ? "新建失败（退出码 \(exitCode)）。"
+                    : "新建失败（退出码 \(exitCode)）：\n\(snippet)"
+            }
+        }
+    }
+
     private func beginRename(_ entry: RemoteListingEntry) {
         let remotePath = browser.remotePath(for: entry)
         guard !renamingNames.contains(entry.name),
@@ -1128,6 +1298,131 @@ private struct RemoteDirectoryBrowserSheet: View {
                     ? "删除失败（退出码 \(exitCode)）。"
                     : "删除失败（退出码 \(exitCode)）：\n\(snippet)"
             }
+        }
+    }
+
+    private func newItemPromptOverlay(_ prompt: NewItemPrompt) -> some View {
+        let isFolder = prompt.kind == .folder
+        let fieldLabel = isFolder ? "文件夹名称 *" : "文件名称 *"
+        let helpText = isFolder
+            ? "将在当前远端目录下创建文件夹。若同名路径已存在，则不会覆盖。"
+            : "将在当前远端目录下创建空文件。若同名路径已存在，则不会覆盖。"
+
+        return ZStack {
+            Color.black.opacity(0.18)
+                .ignoresSafeArea()
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    cancelNewItemPrompt()
+                }
+
+            VStack(alignment: .leading, spacing: 0) {
+                ZStack(alignment: .topTrailing) {
+                    VStack(alignment: .leading, spacing: 16) {
+                        newItemPromptField(label: fieldLabel)
+
+                        Text(helpText)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+
+                        if let newItemPromptErrorText {
+                            Text(newItemPromptErrorText)
+                                .font(.caption)
+                                .foregroundStyle(Color.red)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .transition(.opacity.combined(with: .move(edge: .top)))
+                        }
+                    }
+                    .padding(.horizontal, 24)
+                    .padding(.top, 34)
+                    .padding(.bottom, 24)
+
+                    Button {
+                        cancelNewItemPrompt()
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .symbolRenderingMode(.hierarchical)
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.top, 12)
+                    .padding(.trailing, 12)
+                    .accessibilityLabel("关闭新建")
+                    .porterPointingHandCursor()
+                }
+
+                HStack(spacing: 10) {
+                    Spacer()
+                    Button("取消", role: .cancel) {
+                        cancelNewItemPrompt()
+                    }
+                    .keyboardShortcut(.cancelAction)
+                    .porterPointingHandCursor()
+
+                    Button("确认") {
+                        continueNewItemPrompt(prompt)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(Color.porterAccent)
+                    .keyboardShortcut(.defaultAction)
+                    .controlSize(.large)
+                    .porterPointingHandCursor()
+                }
+                .padding(.horizontal, 24)
+                .padding(.top, 8)
+                .padding(.bottom, 24)
+            }
+            .frame(width: 560)
+            .background(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(Color.porterSurface)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .strokeBorder(Color.porterBorder, lineWidth: 1)
+            )
+            .shadow(color: .black.opacity(0.20), radius: 22, x: 0, y: 12)
+            .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .onTapGesture {}
+            .modifier(PorterRenameCardShakeEffect(amplitude: 12, phase: newItemCardShakePhase))
+            .onAppear {
+                isNewItemPromptFocused = true
+            }
+            .animation(.easeOut(duration: 0.18), value: newItemPromptErrorText)
+        }
+    }
+
+    private func newItemPromptField(label: String) -> some View {
+        let borderAccent = newItemPromptErrorText == nil ? Color.porterAccent : Color.red
+
+        return VStack(alignment: .leading, spacing: 4) {
+            Text(label)
+                .font(.system(.caption).weight(.medium))
+                .foregroundStyle(borderAccent)
+                .padding(.horizontal, 6)
+                .background(Color.porterSurface)
+                .offset(x: 12, y: 8)
+                .zIndex(1)
+
+            TextField("", text: $newItemDraftName)
+                .textFieldStyle(.plain)
+                .font(.system(size: 16, design: .monospaced))
+                .focused($isNewItemPromptFocused)
+                .lineLimit(1)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+                .background(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(Color.porterSurface.opacity(0.85))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .strokeBorder(borderAccent.opacity(newItemPromptErrorText == nil ? 0.55 : 0.85), lineWidth: newItemPromptErrorText == nil ? 1.5 : 2)
+                )
+                .onChange(of: newItemDraftName) { _, _ in
+                    newItemPromptErrorText = nil
+                }
         }
     }
 
