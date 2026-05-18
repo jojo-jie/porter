@@ -1,5 +1,4 @@
 import AppKit
-import CryptoKit
 import Foundation
 import PorterCore
 
@@ -29,6 +28,23 @@ final class RemoteFileEditCoordinator: ObservableObject {
 
     func isBusy(host: String, remotePath: String) -> Bool {
         busySessionKeys.contains(sessionKey(host: host, remotePath: remotePath))
+    }
+
+    var hasActiveEditSessions: Bool {
+        !sessions.isEmpty
+    }
+
+    var isBusyForAnySession: Bool {
+        !busySessionKeys.isEmpty
+    }
+
+    /// Drops in-memory edit sessions after local staging files were removed (e.g. cache clear).
+    func discardAllSessions() {
+        for key in sessions.keys {
+            sessions[key]?.debouncedUploadTask?.cancel()
+        }
+        sessions.removeAll()
+        busySessionKeys.removeAll()
     }
 
     /// Prepares staging copy (if needed), opens the default app, and watches for saves.
@@ -193,19 +209,7 @@ final class RemoteFileEditCoordinator: ObservableObject {
     }
 
     private static func stagingLocations(host: String, remotePath: String, fileName: String) throws -> (directory: URL, file: URL) {
-        guard let cachesRoot = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else {
-            throw CocoaError(.fileNoSuchFile)
-        }
-        let hostFolder = host
-            .replacingOccurrences(of: "/", with: "_")
-            .replacingOccurrences(of: ":", with: "_")
-        let digest = SHA256.hash(data: Data(remotePath.utf8))
-        let pathHash = digest.prefix(12).map { String(format: "%02x", $0) }.joined()
-        let directory = cachesRoot
-            .appendingPathComponent("Porter/remote-edit", isDirectory: true)
-            .appendingPathComponent(hostFolder, isDirectory: true)
-            .appendingPathComponent(pathHash, isDirectory: true)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let directory = try RemoteEditCache.stagingDirectoryURL(host: host, remotePath: remotePath)
         return (directory, directory.appendingPathComponent(fileName, isDirectory: false))
     }
 

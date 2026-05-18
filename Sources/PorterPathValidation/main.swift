@@ -153,4 +153,26 @@ else {
     fatalError("overlong UTF-8 length rejected")
 }
 
+expectEqual(RemoteEditCache.sanitizedHostFolderName("my/host:22"), "my_host_22", "host folder sanitizes slashes and colons")
+expectEqual(RemoteEditCache.remotePathHash("/var/www/app"), RemoteEditCache.remotePathHash("/var/www/app"), "remote path hash is stable")
+expectEqual(RemoteEditCache.formattedMegabytes(forBytes: 0), "0.0 MB", "zero bytes formats as megabytes")
+expectEqual(RemoteEditCache.formattedMegabytes(forBytes: 1_048_576), "1.0 MB", "one binary megabyte formats with one decimal")
+
+let tempRoot = FileManager.default.temporaryDirectory.appendingPathComponent("porter-cache-test-\(UUID().uuidString)", isDirectory: true)
+do {
+    try FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+    let sampleFile = tempRoot.appendingPathComponent("sample.txt")
+    try "hello".write(to: sampleFile, atomically: true, encoding: .utf8)
+    let measured = RemoteEditCache.directorySize(at: tempRoot)
+    guard measured > 0 else {
+        fatalError("directory size should count regular files")
+    }
+    try FileManager.default.removeItem(at: sampleFile)
+    expectEqual(RemoteEditCache.directorySize(at: tempRoot), 0, "empty directory reports zero size")
+} catch {
+    fatalError("cache size test failed: \(error)")
+}
+
 print("Remote path validation passed")

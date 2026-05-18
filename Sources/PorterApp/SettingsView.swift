@@ -1,4 +1,5 @@
 import AppKit
+import PorterCore
 import SwiftUI
 
 enum AppAppearanceMode: String, CaseIterable, Identifiable {
@@ -133,7 +134,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .appearance: return "调整 Porter 的主题外观。"
         case .transfer: return "上传时若远端已有同名文件或目录时的处理方式。"
         case .terminal: return "选择在主窗口点击「打开终端」时使用的终端应用。"
-        case .configuration: return "OpenSSH 配置与本机默认下载目录；每台主机的远端目录仍在主窗口设置。"
+        case .configuration: return "OpenSSH 配置、本机默认下载目录与远程编辑缓存；每台主机的远端目录仍在主窗口设置。"
         }
     }
 
@@ -360,6 +361,7 @@ struct SettingsDetailColumn: View {
         VStack(alignment: .leading, spacing: 16) {
             SSHConfigPathSettingsCard()
             DefaultDownloadDirectorySettingsCard()
+            RemoteEditCacheSettingsCard()
 
             SettingCard {
                 VStack(alignment: .leading, spacing: 6) {
@@ -373,6 +375,160 @@ struct SettingsDetailColumn: View {
             }
 
             Spacer(minLength: 0)
+        }
+    }
+}
+
+private struct RemoteEditCacheSettingsCard: View {
+    @EnvironmentObject private var remoteFileEditCoordinator: RemoteFileEditCoordinator
+
+    @State private var cacheSizeBytes: Int64 = 0
+    @State private var isMeasuring = false
+    @State private var isClearing = false
+    @State private var statusMessage: String?
+    @State private var statusIsError = false
+
+    private var formattedCacheSize: String {
+        RemoteEditCache.formattedMegabytes(forBytes: cacheSizeBytes)
+    }
+
+    private var cacheLocationHint: String {
+        if let root = RemoteEditCache.cacheRootURL() {
+            return root.path
+        }
+        return "无法解析缓存目录路径"
+    }
+
+    private var statusColor: Color {
+        statusIsError ? Color.red.opacity(0.9) : Color.secondary
+    }
+
+    private var editingBlockReason: String? {
+        if remoteFileEditCoordinator.isBusyForAnySession {
+            return "有文件正在同步，请稍后再清除缓存。"
+        }
+        if remoteFileEditCoordinator.hasActiveEditSessions {
+            return "仍有远程文件在编辑中，请先关闭对应应用后再清除。"
+        }
+        return nil
+    }
+
+    private var canClearCache: Bool {
+        cacheSizeBytes > 0 && !isMeasuring && !isClearing && editingBlockReason == nil
+    }
+
+    var body: some View {
+        SettingCard {
+            VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("远程编辑缓存")
+                        .font(.system(.headline).weight(.semibold))
+                    Text("通过默认应用编辑远端文件时，会暂存到本机 Caches；保存后自动上传。清除后不影响远端文件。")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    Text("当前占用")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+
+                    Text(formattedCacheSize)
+                        .font(.system(.title3, design: .monospaced).weight(.semibold))
+                        .foregroundStyle(.primary)
+                        .textSelection(.enabled)
+
+                    if isMeasuring {
+                        ProgressView()
+                            .controlSize(.small)
+                            .padding(.leading, 4)
+                    }
+
+                    Spacer(minLength: 8)
+
+                    Button("清除缓存") {
+                        confirmAndClearCache()
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(Color.porterAccent)
+                    .disabled(!canClearCache)
+                    .porterPointingHandCursor()
+                }
+
+                Text(cacheLocationHint)
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(.tertiary)
+                    .textSelection(.enabled)
+                    .lineLimit(2)
+                    .truncationMode(.middle)
+
+                if let statusMessage {
+                    Text(statusMessage)
+                        .font(.caption)
+                        .foregroundStyle(statusColor)
+                        .textSelection(.enabled)
+                } else if let editingBlockReason {
+                    Text(editingBlockReason)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .task {
+            await refreshCacheSize()
+        }
+    }
+
+    private func refreshCacheSize() async {
+        isMeasuring = true
+        defer { isMeasuring = false }
+
+        let measured = await Task.detached(priority: .utility) {
+            RemoteEditCache.measuredSizeInBytes()
+        }.value
+
+        cacheSizeBytes = measured
+    }
+
+    private func confirmAndClearCache() {
+        guard cacheSizeBytes > 0 else { return }
+
+        let alert = NSAlert()
+        alert.messageText = "清除远程编辑缓存？"
+        alert.informativeText = "将删除约 \(formattedCacheSize) 的本地暂存文件。正在编辑且未保存的更改可能丢失；远端文件不受影响。"
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "清除")
+        alert.addButton(withTitle: "取消")
+
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+
+        Task {
+            await clearCache()
+        }
+    }
+
+    private func clearCache() async {
+        isClearing = true
+        statusMessage = nil
+        statusIsError = false
+        defer { isClearing = false }
+
+        if remoteFileEditCoordinator.hasActiveEditSessions {
+            remoteFileEditCoordinator.discardAllSessions()
+        }
+
+        do {
+            _ = try await Task.detached(priority: .userInitiated) {
+                try RemoteEditCache.clear()
+            }.value
+            cacheSizeBytes = 0
+            statusMessage = "缓存已清除。"
+            statusIsError = false
+        } catch {
+            statusMessage = "清除失败：\(error.localizedDescription)"
+            statusIsError = true
+            await refreshCacheSize()
         }
     }
 }
