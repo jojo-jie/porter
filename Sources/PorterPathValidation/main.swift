@@ -154,6 +154,13 @@ else {
 }
 
 expectEqual(RemoteEditCache.sanitizedHostFolderName("my/host:22"), "my_host_22", "host folder sanitizes slashes and colons")
+expectEqual(RemoteEditCache.sanitizedHostFolderName(""), "_", "empty host folder becomes underscore")
+expectEqual(RemoteEditCache.sanitizedHostFolderName(".."), "_..", "dot-dot host folder is escaped")
+expectEqual(
+    RemoteEditCache.remotePathHash(RemoteEditCache.canonicalCachePath("~/proj/")),
+    RemoteEditCache.remotePathHash(RemoteEditCache.canonicalCachePath("~/proj")),
+    "canonical cache path ignores trailing slash"
+)
 expectEqual(RemoteEditCache.remotePathHash("/var/www/app"), RemoteEditCache.remotePathHash("/var/www/app"), "remote path hash is stable")
 expectEqual(RemoteEditCache.formattedMegabytes(forBytes: 0), "0.0 MB", "zero bytes formats as megabytes")
 expectEqual(RemoteEditCache.formattedMegabytes(forBytes: 1_048_576), "1.0 MB", "one binary megabyte formats with one decimal")

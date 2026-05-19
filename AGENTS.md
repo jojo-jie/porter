@@ -76,9 +76,36 @@
 
 ### UI 设计与上下文（自动化代理）
 
-- **规则注入范围**：工作区若将本文件设为「始终应用 / always applied」，只会把 **AGENTS.md 正文**注入对话上下文；`design-package/DESIGN.md` **不会**仅因文中链接而自动附带。人工在 Cursor 里做 UI 相关对话时，请用 **`@design-package/DESIGN.md`** 显式附加该文件；自动化代理在改 UI 前须用 `read_file` 读取该路径。
-- **UI 改动前的必读步骤**：在编辑、新增或审阅 **`Sources/PorterApp/**/*.swift`**（及其他 SwiftUI 表现层）前，**必须先完整阅读** [design-package/DESIGN.md](design-package/DESIGN.md)（代理侧用 `read_file` 指向 `design-package/DESIGN.md`）；布局、间距、圆角节奏、组件细则、动效与禁忌以该全文为准，不得只凭本节摘录实现。
-- **设计 token 快照（轻量摘录）**：下列色值用于在仅注入本文件时仍能对齐配色；与 `DESIGN.md` 冲突时以仓库内 `DESIGN.md` 为准。
+#### 机制说明
+
+| 来源 | 何时生效 | 是否附带 `DESIGN.md` 全文 |
+| --- | --- | --- |
+| 根目录 `AGENTS.md`（always applied） | 每次对话 | **否**（仅正文 + 本节 token 摘要） |
+| `.cursor/rules/porter-swiftui-design.mdc` | 编辑 `Sources/PorterApp/**/*.swift` 时 | **是**（规则内 `@design-package/DESIGN.md`） |
+| `Sources/PorterApp/AGENTS.md` | 处理该目录及子路径时 | **否**（指向上述规则与设计文档） |
+| 用户 `@design-package/DESIGN.md` | 人工对话 | **是** |
+
+Markdown 链接**不会**自动加载 `design-package/DESIGN.md`。
+
+#### UI 改动工作流（顺序不可跳过）
+
+1. **确认设计上下文已就绪**，满足以下任一即可：
+   - 当前任务已命中 `.cursor/rules/porter-swiftui-design.mdc`（编辑 `Sources/PorterApp/**/*.swift` 时通常自动注入）；或
+   - 已用 `read_file` **完整读取** `design-package/DESIGN.md`。
+2. **再**编辑、新增或审阅 `Sources/PorterApp/**/*.swift` 及其他 SwiftUI 表现层文件。
+3. 布局、间距、圆角节奏、组件细则、动效与禁忌以 `DESIGN.md` 全文为准；与下文 token 表冲突时以 `DESIGN.md` 为准。
+
+**未命中** `porter-swiftui-design` 规则时（例如只改 `PorterCore`、跨目录重构、或未打开 `PorterApp` 下的 Swift 文件），在**第一次**改动任何 SwiftUI 表现层之前，**必须**完成步骤 1 中的 `read_file`。
+
+#### 禁止
+
+- 未读 `DESIGN.md`（且未命中含 `@design-package/DESIGN.md` 的 Cursor 规则）就改 UI。
+- 用系统默认 Accent 替代 Porter 暖橙强调色（`#CC785C` / `#D47D60`）。
+- 用厚重阴影或非工具化装饰替代发丝边框与色差层次。
+
+#### 设计 token 快照（轻量摘录）
+
+下列色值**仅**用于在仅注入本文件时对齐配色；**不得**仅凭本表实现布局、组件或动效。
 
 | 角色 | 浅色 | 深色 |
 | --- | --- | --- |
@@ -92,4 +119,6 @@
 | Secondary Text | `#68625A` | `#B8B0A6` |
 | Tertiary Text | `#9B948A` | `#817A72` |
 
-- **一句话原则**：暖奶油画布、**单一暖橙强调色**（Accent）、系统字体 + **路径/技术字段等宽**、**1px 发丝边框**与连续圆角、克制层次；状态色沿用系统语义，避免与主 Accent 竞争。
+#### 一句话原则
+
+暖奶油画布、**单一暖橙强调色**（Accent）、系统字体 + **路径/技术字段等宽**、**1px 发丝边框**与连续圆角、克制层次；状态色沿用系统语义，避免与主 Accent 竞争。

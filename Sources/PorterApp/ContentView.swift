@@ -8,6 +8,7 @@ struct ContentView: View {
     @EnvironmentObject private var terminalPreferences: TerminalPreferencesStore
     @EnvironmentObject private var sshConfigPreferences: SSHConfigPreferencesStore
     @EnvironmentObject private var uploadPreferences: UploadPreferencesStore
+    @EnvironmentObject private var remoteFileEditCoordinator: RemoteFileEditCoordinator
     @StateObject private var model = AppModel()
     @State private var isFileImporterPresented = false
     @State private var isDropTargeted = false
@@ -62,6 +63,16 @@ struct ContentView: View {
         .animation(.easeOut(duration: 0.16), value: isRemoteBrowserPresented)
         .onAppear {
             model.refreshHosts(using: sshConfigPreferences)
+            remoteFileEditCoordinator.pruneSessionsWithMissingLocalFiles()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .porterRemoteEditSyncFailed)) { notification in
+            let name = notification.userInfo?["fileName"] as? String ?? "文件"
+            let detail = notification.userInfo?["message"] as? String ?? "上传失败"
+            model.presentTransientNotice("编辑同步失败：\(name)\n\(detail)", kind: .error, duration: .seconds(4))
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .porterRemoteEditSyncSucceeded)) { notification in
+            let detail = notification.userInfo?["message"] as? String ?? "已同步到远端"
+            model.presentTransientNotice(detail, kind: .success)
         }
         .onReceive(NotificationCenter.default.publisher(for: .porterShowSettings)) { _ in
             isRemoteBrowserPresented = false

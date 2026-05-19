@@ -18,16 +18,22 @@ final class RemoteFileEditCoordinator: ObservableObject {
         var watcher: DirectoryChangeWatcher?
         var debouncedUploadTask: Task<Void, Never>?
         var isUploading: Bool
+        /// Set when the local file changes while an upload is in flight.
+        var pendingUploadAfterCurrent: Bool
     }
 
     private var sessions: [String: Session] = [:]
 
     func sessionKey(host: String, remotePath: String) -> String {
-        "\(host)\u{1F}|" + remotePath
+        "\(host)\u{1F}|" + Self.canonicalRemotePath(remotePath)
     }
 
     func isBusy(host: String, remotePath: String) -> Bool {
         busySessionKeys.contains(sessionKey(host: host, remotePath: remotePath))
+    }
+
+    func hasEditSession(host: String, remotePath: String) -> Bool {
+        sessions[sessionKey(host: host, remotePath: remotePath)] != nil
     }
 
     var hasActiveEditSessions: Bool {
@@ -47,8 +53,20 @@ final class RemoteFileEditCoordinator: ObservableObject {
         busySessionKeys.removeAll()
     }
 
+    /// Ends sessions whose local staging file no longer exists.
+    func pruneSessionsWithMissingLocalFiles() {
+        for key in sessions.keys where sessions[key] != nil {
+            guard let session = sessions[key] else { continue }
+            if !FileManager.default.fileExists(atPath: session.localURL.path) {
+                endSession(sessionKey: key)
+            }
+        }
+    }
+
     /// Prepares staging copy (if needed), opens the default app, and watches for saves.
     func beginEdit(host: String, remotePath: String, fileName: String) async -> String {
+        pruneSessionsWithMissingLocalFiles()
+        let normalizedRemotePath = Self.canonicalRemotePath(remotePath)
         let key = sessionKey(host: host, remotePath: remotePath)
         if let existing = sessions[key] {
             if !FileManager.default.fileExists(atPath: existing.localURL.path) {
@@ -65,19 +83,32 @@ final class RemoteFileEditCoordinator: ObservableObject {
         let stagingDirectory: URL
         let localURL: URL
         do {
-            (stagingDirectory, localURL) = try Self.stagingLocations(host: host, remotePath: remotePath, fileName: fileName)
+            (stagingDirectory, localURL) = try Self.stagingLocations(
+                host: host,
+                remotePath: normalizedRemotePath,
+                fileName: fileName
+            )
         } catch {
             busySessionKeys.remove(key)
             return "无法创建编辑暂存目录：\(error.localizedDescription)"
         }
 
         if FileManager.default.fileExists(atPath: localURL.path) {
-            try? FileManager.default.removeItem(at: localURL)
+            busySessionKeys.remove(key)
+            return activateEditSession(
+                key: key,
+                host: host,
+                remotePath: normalizedRemotePath,
+                fileName: fileName,
+                stagingDirectory: stagingDirectory,
+                localURL: localURL,
+                openedFromCache: true
+            )
         }
 
         let downloadMessage = await RemoteDownloader.download(
             host: host,
-            remotePath: remotePath,
+            remotePath: normalizedRemotePath,
             destinationDirectory: stagingDirectory,
             remoteIsDirectory: false
         )
@@ -91,6 +122,27 @@ final class RemoteFileEditCoordinator: ObservableObject {
             return "下载后未找到本地文件，无法打开：\(fileName)"
         }
 
+        busySessionKeys.remove(key)
+        return activateEditSession(
+            key: key,
+            host: host,
+            remotePath: normalizedRemotePath,
+            fileName: fileName,
+            stagingDirectory: stagingDirectory,
+            localURL: localURL,
+            openedFromCache: false
+        )
+    }
+
+    private func activateEditSession(
+        key: String,
+        host: String,
+        remotePath: String,
+        fileName: String,
+        stagingDirectory: URL,
+        localURL: URL,
+        openedFromCache: Bool
+    ) -> String {
         let parentDirectory = Self.remoteParentDirectory(of: remotePath)
         var session = Session(
             host: host,
@@ -102,7 +154,8 @@ final class RemoteFileEditCoordinator: ObservableObject {
             acceptsUploads: false,
             watcher: nil,
             debouncedUploadTask: nil,
-            isUploading: false
+            isUploading: false,
+            pendingUploadAfterCurrent: false
         )
 
         session.watcher = DirectoryChangeWatcher(directoryURL: stagingDirectory) { [weak self] in
@@ -110,25 +163,35 @@ final class RemoteFileEditCoordinator: ObservableObject {
                 self?.handleLocalFileChange(sessionKey: key)
             }
         }
+        guard session.watcher != nil else {
+            return "无法监视编辑暂存目录，保存后将无法自动上传。请检查磁盘权限或稍后重试。"
+        }
 
         sessions[key] = session
         NSWorkspace.shared.open(localURL)
-
         sessions[key]?.acceptsUploads = true
-        busySessionKeys.remove(key)
 
+        if openedFromCache {
+            return "已用默认应用打开：\(fileName)（使用本地缓存，保存后将自动上传）"
+        }
         return "已用默认应用打开：\(fileName)（保存后将自动上传到远端）"
     }
 
     private func handleLocalFileChange(sessionKey: String) {
         guard var session = sessions[sessionKey] else { return }
-        guard session.acceptsUploads, !session.isUploading else { return }
-        guard FileManager.default.fileExists(atPath: session.localURL.path) else { return }
-
-        let currentDate = Self.fileModificationDate(at: session.localURL)
-        if let last = session.lastSyncedModificationDate, let current = currentDate, current <= last {
+        guard session.acceptsUploads else { return }
+        guard FileManager.default.fileExists(atPath: session.localURL.path) else {
+            endSession(sessionKey: sessionKey)
             return
         }
+
+        if session.isUploading {
+            session.pendingUploadAfterCurrent = true
+            sessions[sessionKey] = session
+            return
+        }
+
+        guard Self.localFileNeedsUpload(session: session) else { return }
 
         session.debouncedUploadTask?.cancel()
         session.debouncedUploadTask = Task { @MainActor [weak self] in
@@ -142,14 +205,15 @@ final class RemoteFileEditCoordinator: ObservableObject {
     private func uploadIfNeeded(sessionKey: String) async {
         guard var session = sessions[sessionKey] else { return }
         guard session.acceptsUploads, !session.isUploading else { return }
-        guard FileManager.default.fileExists(atPath: session.localURL.path) else { return }
-
-        let currentDate = Self.fileModificationDate(at: session.localURL)
-        if let last = session.lastSyncedModificationDate, let current = currentDate, current <= last {
+        guard FileManager.default.fileExists(atPath: session.localURL.path) else {
+            endSession(sessionKey: sessionKey)
             return
         }
+        guard Self.localFileNeedsUpload(session: session) else { return }
 
+        let mtimeBeforeUpload = Self.fileModificationDate(at: session.localURL)
         session.isUploading = true
+        session.pendingUploadAfterCurrent = false
         sessions[sessionKey] = session
         busySessionKeys.insert(sessionKey)
 
@@ -159,15 +223,38 @@ final class RemoteFileEditCoordinator: ObservableObject {
             remoteDirectory: session.remoteParentDirectory
         )
 
+        guard var session = sessions[sessionKey] else {
+            busySessionKeys.remove(sessionKey)
+            return
+        }
+
         session.isUploading = false
         busySessionKeys.remove(sessionKey)
 
         if result.success {
-            session.lastSyncedModificationDate = Self.fileModificationDate(at: session.localURL) ?? currentDate
+            session.lastSyncedModificationDate = Self.fileModificationDate(at: session.localURL) ?? mtimeBeforeUpload
         }
         sessions[sessionKey] = session
 
-        let notificationName: Notification.Name = result.success
+        postSyncNotification(for: session, success: result.success, message: result.message)
+
+        guard result.success else { return }
+
+        let mtimeAfterUpload = Self.fileModificationDate(at: session.localURL)
+        let changedDuringUpload = Self.fileModificationAdvanced(from: mtimeBeforeUpload, to: mtimeAfterUpload)
+        let needsFollowUpUpload = session.pendingUploadAfterCurrent
+            || changedDuringUpload
+            || Self.localFileNeedsUpload(session: session)
+
+        guard needsFollowUpUpload else { return }
+
+        session.pendingUploadAfterCurrent = false
+        sessions[sessionKey] = session
+        await uploadIfNeeded(sessionKey: sessionKey)
+    }
+
+    private func postSyncNotification(for session: Session, success: Bool, message: String) {
+        let notificationName: Notification.Name = success
             ? .porterRemoteEditSyncSucceeded
             : .porterRemoteEditSyncFailed
         NotificationCenter.default.post(
@@ -175,9 +262,25 @@ final class RemoteFileEditCoordinator: ObservableObject {
             object: nil,
             userInfo: [
                 "fileName": session.fileName,
-                "message": result.message,
+                "message": message,
             ]
         )
+    }
+
+    private static func localFileNeedsUpload(session: Session) -> Bool {
+        guard FileManager.default.fileExists(atPath: session.localURL.path) else { return false }
+        let currentDate = fileModificationDate(at: session.localURL)
+        if let last = session.lastSyncedModificationDate, let current = currentDate {
+            return current > last
+        }
+        return currentDate != nil
+    }
+
+    private static func fileModificationAdvanced(from before: Date?, to after: Date?) -> Bool {
+        guard let before, let after else {
+            return before != after
+        }
+        return after > before
     }
 
     private static func uploadFile(host: String, localURL: URL, remoteDirectory: String) async -> (success: Bool, message: String) {
@@ -198,6 +301,16 @@ final class RemoteFileEditCoordinator: ObservableObject {
             return (false, "上传失败（退出码 \(result.exitCode)）")
         }
         return (false, "上传失败：\(detail)")
+    }
+
+    private func endSession(sessionKey: String) {
+        sessions[sessionKey]?.debouncedUploadTask?.cancel()
+        sessions.removeValue(forKey: sessionKey)
+        busySessionKeys.remove(sessionKey)
+    }
+
+    private static func canonicalRemotePath(_ remotePath: String) -> String {
+        RemoteEditCache.canonicalCachePath(remotePath)
     }
 
     private static func remoteParentDirectory(of remoteFilePath: String) -> String {

@@ -34,7 +34,7 @@ public enum RemoteEditCache {
             throw RemoteEditCacheError.cachesDirectoryUnavailable
         }
         let hostFolder = sanitizedHostFolderName(host)
-        let pathHash = remotePathHash(remotePath)
+        let pathHash = remotePathHash(canonicalCachePath(remotePath))
         let directory = root
             .appendingPathComponent(hostFolder, isDirectory: true)
             .appendingPathComponent(pathHash, isDirectory: true)
@@ -43,9 +43,22 @@ public enum RemoteEditCache {
     }
 
     public static func sanitizedHostFolderName(_ host: String) -> String {
-        host
+        var sanitized = host
             .replacingOccurrences(of: "/", with: "_")
             .replacingOccurrences(of: ":", with: "_")
+            .replacingOccurrences(of: "\\", with: "_")
+        if sanitized.isEmpty {
+            sanitized = "_"
+        }
+        if sanitized == "." || sanitized == ".." {
+            sanitized = "_\(sanitized)"
+        }
+        return sanitized
+    }
+
+    /// Normalizes logical remote paths so equivalent forms share one cache directory.
+    public static func canonicalCachePath(_ remotePath: String) -> String {
+        RemotePathCodec.join(RemotePathCodec.split(remotePath))
     }
 
     public static func remotePathHash(_ remotePath: String) -> String {

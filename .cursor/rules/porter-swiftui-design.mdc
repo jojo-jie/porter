@@ -6,10 +6,11 @@ alwaysApply: false
 
 # Porter SwiftUI 设计规范
 
-编辑或审阅匹配文件时，落实下列设计系统（下方 `@` 引用会将全文纳入本规则上下文）。
+编辑或审阅匹配文件时，落实下列设计系统（下方 `@` 引用会将全文纳入本规则上下文）。目录级约定见 `Sources/PorterApp/AGENTS.md`。
 
 - 色板与角色以引用文件为准：Canvas / Surface / Sidebar / Accent / 文本层级 / Border；**不要让系统默认 Accent 取代 Porter 暖橙**。
 - 路径、端口、权限、日志等技术文本使用等宽字体；层次靠轻微色差与 **1px 发丝边框**，避免厚重阴影与非工具化装饰。
-- 双栏布局、间距与圆角节奏、组件尺寸、动效与禁忌均以引用全文为准；根目录 `AGENTS.md` 中 token 表仅为摘要。
+- 双栏布局、间距与圆角节奏、组件尺寸、动效与禁忌均以引用全文为准；根目录 `AGENTS.md` 中 token 表仅为摘要，不可替代全文。
+- 未命中本规则（glob 未覆盖）却需改 SwiftUI 时：必须先 `read_file` 读取 `design-package/DESIGN.md`，再动手改代码。
 
 @design-package/DESIGN.md
