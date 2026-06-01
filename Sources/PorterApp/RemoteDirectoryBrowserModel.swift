@@ -3,6 +3,15 @@ import PorterCore
 
 @MainActor
 final class RemoteDirectoryBrowserModel: ObservableObject {
+    private struct CachedListing {
+        let pwd: String
+        let entries: [RemoteListingEntry]
+        let fetchedAt: Date
+    }
+
+    private static var listingCache: [String: CachedListing] = [:]
+    private static let listingCacheTTL: TimeInterval = 30
+
     let hostAlias: String
 
     @Published private(set) var segments: [String]
@@ -36,31 +45,28 @@ final class RemoteDirectoryBrowserModel: ObservableObject {
 
     func replacePathAndReload(_ newSegments: [String]) {
         guard newSegments != segments else { return }
-        let requestID = beginListLoad()
         pastSegments.append(segments)
         futureSegments.removeAll()
         segments = newSegments
         syncHistoryFlags()
-        Task { await performListFetch(requestID: requestID, segmentsSnapshot: newSegments) }
+        Task { await loadListing(for: newSegments, force: false) }
     }
 
     func goBack() {
         guard let prev = pastSegments.popLast() else { return }
-        let requestID = beginListLoad()
         futureSegments.insert(segments, at: 0)
         segments = prev
         syncHistoryFlags()
-        Task { await performListFetch(requestID: requestID, segmentsSnapshot: prev) }
+        Task { await loadListing(for: prev, force: false) }
     }
 
     func goForward() {
         guard !futureSegments.isEmpty else { return }
-        let requestID = beginListLoad()
         let next = futureSegments.removeFirst()
         pastSegments.append(segments)
         segments = next
         syncHistoryFlags()
-        Task { await performListFetch(requestID: requestID, segmentsSnapshot: next) }
+        Task { await loadListing(for: next, force: false) }
     }
 
     func goToParent() {
@@ -97,10 +103,43 @@ final class RemoteDirectoryBrowserModel: ObservableObject {
         remotePathInCurrentDirectory(named: entry.name)
     }
 
-    func refreshList() async {
-        let snapshot = segments
+    func refreshList(force: Bool = false) async {
+        await loadListing(for: segments, force: force)
+    }
+
+    func invalidateCurrentListingCache() {
+        Self.listingCache.removeValue(forKey: cacheKey(for: segments))
+    }
+
+    private func loadListing(for segmentsSnapshot: [String], force: Bool) async {
+        if !force, applyCachedListingIfFresh(for: segmentsSnapshot) {
+            return
+        }
         let requestID = beginListLoad()
-        await performListFetch(requestID: requestID, segmentsSnapshot: snapshot)
+        await performListFetch(requestID: requestID, segmentsSnapshot: segmentsSnapshot)
+    }
+
+    private func cacheKey(for segments: [String]) -> String {
+        "\(hostAlias)\u{1F}|\(RemotePathCodec.join(segments))"
+    }
+
+    private func applyCachedListingIfFresh(for segmentsSnapshot: [String]) -> Bool {
+        guard let cached = Self.listingCache[cacheKey(for: segmentsSnapshot)] else { return false }
+        guard Date().timeIntervalSince(cached.fetchedAt) < Self.listingCacheTTL else { return false }
+        isLoading = false
+        errorMessage = nil
+        resolvedPWD = cached.pwd
+        entries = cached.entries
+        syncHistoryFlags()
+        return true
+    }
+
+    private func storeListingCache(segmentsSnapshot: [String], pwd: String, entries: [RemoteListingEntry]) {
+        Self.listingCache[cacheKey(for: segmentsSnapshot)] = CachedListing(
+            pwd: pwd,
+            entries: entries,
+            fetchedAt: Date()
+        )
     }
 
     private func performListFetch(requestID: UInt64, segmentsSnapshot: [String]) async {
@@ -153,6 +192,7 @@ final class RemoteDirectoryBrowserModel: ObservableObject {
             parsed.insert(.parentDirectory, at: 0)
         }
         entries = parsed
+        storeListingCache(segmentsSnapshot: segmentsSnapshot, pwd: pwd, entries: parsed)
     }
 
     private func syncHistoryFlags() {

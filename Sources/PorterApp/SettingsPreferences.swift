@@ -80,7 +80,7 @@ enum ExternalTerminalApp: String, CaseIterable, Identifiable {
         case .appleTerminal:
             return "使用 macOS 自带的「终端」新建窗口并执行 SSH，登录后进入该主机在主窗口配置的默认远程目录。"
         case .warp:
-            return "更新 Warp「Porter Connect」并模拟 ⌘T 打开（与手动一致）。需在「隐私与安全性 → 辅助功能/输入监控」中允许 Porter。"
+            return "通过 Warp URL 打开 Porter 专用 Tab Config 并执行 SSH，不会修改 Warp 自身的新标签页默认设置。"
         case .iterm2:
             return "在 iTerm2 的新标签页中直接执行 SSH，并进入该主机在主窗口配置的默认远程目录。"
         }

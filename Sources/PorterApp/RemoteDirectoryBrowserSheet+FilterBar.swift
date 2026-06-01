@@ -60,7 +60,7 @@ extension RemoteDirectoryBrowserSheet {
                 withAnimation(.spring(response: 0.45, dampingFraction: 0.75)) {
                     listRefreshSpin += 1
                 }
-                Task { await browser.refreshList() }
+                Task { await browser.refreshList(force: true) }
             } label: {
                 Image(systemName: "arrow.clockwise")
                     .imageScale(.medium)

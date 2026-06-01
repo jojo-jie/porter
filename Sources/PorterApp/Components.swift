@@ -242,6 +242,8 @@ struct PorterTransientToast: View {
 struct StatusRow: View {
     let log: String
     let isUploading: Bool
+    let uploadProgress: UploadProgressSnapshot?
+    let onCancelUpload: (() -> Void)?
 
     private enum Kind { case idle, progress, success, error }
 
@@ -249,7 +251,15 @@ struct StatusRow: View {
         if isUploading { return .progress }
         if log.contains("失败") || log.contains("错误") { return .error }
         if log.contains("完成") || log.contains("连接正常") { return .success }
+        if log.contains("已取消") { return .idle }
         return .idle
+    }
+
+    private var displayText: String {
+        if isUploading, let uploadProgress {
+            return uploadProgress.statusText
+        }
+        return log
     }
 
     var body: some View {
@@ -257,13 +267,22 @@ struct StatusRow: View {
             indicator
                 .frame(width: 14, height: 14)
 
-            Text(log)
+            Text(displayText)
                 .font(.system(.callout, design: .monospaced))
                 .foregroundStyle(.secondary)
                 .textSelection(.enabled)
-                .lineLimit(2)
+                .lineLimit(3)
                 .truncationMode(.tail)
                 .frame(maxWidth: .infinity, alignment: .leading)
+
+            if isUploading, let onCancelUpload {
+                Button("取消") {
+                    onCancelUpload()
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .porterPointingHandCursor()
+            }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
@@ -297,6 +316,7 @@ struct StatusRow: View {
 struct DropZone: View {
     let isTargeted: Bool
     let isUploading: Bool
+    let uploadProgress: UploadProgressSnapshot?
 
     private var iconName: String {
         if isUploading { return "arrow.triangle.2.circlepath" }
@@ -304,12 +324,14 @@ struct DropZone: View {
     }
 
     private var primaryText: String {
-        if isUploading { return "正在上传…" }
+        if isUploading {
+            return uploadProgress?.statusText ?? "正在上传…"
+        }
         return isTargeted ? "释放即可上传" : "把文件拖到这里"
     }
 
     private var supportText: String {
-        if isUploading { return "请稍候，文件正在通过 scp 发送" }
+        if isUploading { return "传输进行中，可点击下方状态栏取消" }
         return "或点击下方按钮选择本地文件"
     }
 

@@ -1,5 +1,36 @@
 import Foundation
+import PorterCore
 import SwiftUI
+
+struct UploadProgressSnapshot: Equatable {
+    enum Phase: Equatable {
+        case preparing
+        case uploading
+    }
+
+    let phase: Phase
+    let completedCount: Int
+    let totalCount: Int
+    let detail: String?
+
+    var statusText: String {
+        switch phase {
+        case .preparing:
+            if totalCount <= 1 {
+                return "正在准备上传…"
+            }
+            return "正在准备上传（\(completedCount)/\(totalCount)）…"
+        case .uploading:
+            if totalCount <= 1 {
+                return "正在通过 SFTP 上传…"
+            }
+            if let detail, !detail.isEmpty {
+                return "正在上传（\(totalCount) 项）：\(detail)"
+            }
+            return "正在通过 SFTP 上传 \(totalCount) 项…"
+        }
+    }
+}
 
 @MainActor
 final class AppModel: ObservableObject {
@@ -8,17 +39,17 @@ final class AppModel: ObservableObject {
     @Published var defaultPaths: [String: String] = [:]
     @Published var isUploading = false
     @Published var isTestingConnection = false
+    @Published var uploadProgress: UploadProgressSnapshot?
     @Published var log = ""
     @Published private(set) var transientNotice: TransientNotice?
 
     private let defaultsKey = "hostDefaultPaths"
     private var transientNoticeDismissTask: Task<Void, Never>?
+    private var uploadCancellation: PorterSubprocessCancellation?
 
     var selectedHost: SSHHost? {
         hosts.first { $0.id == selectedHostID }
     }
-
-    var isBusy: Bool { isUploading || isTestingConnection }
 
     init() {
         loadDefaultPaths()
@@ -50,7 +81,7 @@ final class AppModel: ObservableObject {
             presentTransientNotice("请先选择主机。", kind: .error)
             return
         }
-        guard !isBusy else { return }
+        guard !isTestingConnection else { return }
 
         isTestingConnection = true
 
@@ -62,6 +93,10 @@ final class AppModel: ObservableObject {
                 self.presentTransientNotice(result, kind: TransientNotice.kind(forConnectionTestResult: result))
             }
         }
+    }
+
+    func cancelUpload() {
+        uploadCancellation?.cancel()
     }
 
     func presentTransientNotice(_ message: String, kind: TransientNotice.Kind, duration: Duration = .seconds(2)) {
@@ -94,7 +129,7 @@ final class AppModel: ObservableObject {
             log = "请先选择主机。"
             return
         }
-        guard !isBusy else { return }
+        guard !isUploading else { return }
         let remotePath = defaultPaths[host.id, default: ""].trimmingCharacters(in: .whitespacesAndNewlines)
         guard !remotePath.isEmpty else {
             log = "请先为 \(host.name) 设置默认远程目录。"
@@ -106,7 +141,10 @@ final class AppModel: ObservableObject {
             return
         }
 
+        let cancellation = PorterSubprocessCancellation()
+        uploadCancellation = cancellation
         isUploading = true
+        uploadProgress = UploadProgressSnapshot(phase: .preparing, completedCount: 0, totalCount: fileURLs.count, detail: nil)
         log = "开始上传 \(fileURLs.count) 个项目到 \(host.name):\(remotePath)"
 
         let hostName = host.name
@@ -115,11 +153,29 @@ final class AppModel: ObservableObject {
                 fileURLs: fileURLs,
                 host: hostName,
                 remotePath: remotePath,
-                conflictStrategy: conflictStrategy
-            )
+                conflictStrategy: conflictStrategy,
+                cancellation: cancellation
+            ) { update in
+                Task { @MainActor in
+                    guard self.isUploading else { return }
+                    self.uploadProgress = UploadProgressSnapshot(
+                        phase: update.phase == .preparing ? .preparing : .uploading,
+                        completedCount: update.completedCount,
+                        totalCount: update.totalCount,
+                        detail: update.detail
+                    )
+                }
+            }
+
             await MainActor.run {
                 self.isUploading = false
-                self.log = result
+                self.uploadProgress = nil
+                self.uploadCancellation = nil
+                if result.wasCancelled {
+                    self.log = "上传已取消。"
+                } else {
+                    self.log = result.message
+                }
             }
         }
     }

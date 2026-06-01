@@ -153,4 +153,42 @@ extension RemoteShellPath {
     public static func itemExistsTestLine(for path: String) -> String {
         "test -e -- \(remotePathShellArgument(for: path))"
     }
+
+    /// One remote shell script that probes many paths; prints `PORTER_EXISTS <index> <0|1>` per line.
+    public static func batchItemExistenceProbeScript(paths: [String]) -> String {
+        guard !paths.isEmpty else { return "true" }
+        var lines = ["set +e"]
+        for (index, path) in paths.enumerated() {
+            lines.append(
+                "if \(itemExistsTestLine(for: path)); then echo \"PORTER_EXISTS \(index) 1\"; else echo \"PORTER_EXISTS \(index) 0\"; fi"
+            )
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    /// Parses ``batchItemExistenceProbeScript(paths:)`` output; `nil` entries were not reported.
+    public static func parseBatchExistenceProbeOutput(_ output: String, count: Int) -> [Bool?] {
+        guard count > 0 else { return [] }
+        var results = [Bool?](repeating: nil, count: count)
+        for rawLine in output.split(separator: "\n", omittingEmptySubsequences: true) {
+            let line = rawLine.trimmingCharacters(in: .whitespaces)
+            let parts = line.split(separator: " ", omittingEmptySubsequences: true).map(String.init)
+            guard parts.count == 3,
+                  parts[0] == "PORTER_EXISTS",
+                  let index = Int(parts[1]),
+                  index >= 0, index < count
+            else {
+                continue
+            }
+            switch parts[2] {
+            case "0":
+                results[index] = false
+            case "1":
+                results[index] = true
+            default:
+                break
+            }
+        }
+        return results
+    }
 }

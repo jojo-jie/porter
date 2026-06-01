@@ -272,7 +272,8 @@ struct RemoteDirectoryBrowserSheet: View {
             if exitCode == 0 {
                 footerStatusMessage = "已新建\(kindLabel)：\(name)"
                 selectedName = name
-                await browser.refreshList()
+                browser.invalidateCurrentListingCache()
+                await browser.refreshList(force: true)
             } else if exitCode == 2 {
                 footerStatusMessage = "无法新建：「\(name)」已存在于当前目录。"
             } else {
@@ -399,7 +400,8 @@ struct RemoteDirectoryBrowserSheet: View {
                 if selectedName == entry.name {
                     selectedName = newName
                 }
-                await browser.refreshList()
+                browser.invalidateCurrentListingCache()
+                await browser.refreshList(force: true)
             } else {
                 let tail = output
                     .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -462,7 +464,8 @@ struct RemoteDirectoryBrowserSheet: View {
                 if selectedName == name {
                     selectedName = nil
                 }
-                await browser.refreshList()
+                browser.invalidateCurrentListingCache()
+                await browser.refreshList(force: true)
             } else {
                 let tail = output
                     .trimmingCharacters(in: .whitespacesAndNewlines)

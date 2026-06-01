@@ -82,6 +82,42 @@ expectEqual(PorterSFTPBatch.batchQuotedPath("/tmp/a"), "\"/tmp/a\"", "sftp batch
 expectEqual(PorterSFTPBatch.batchQuotedPath("/tmp/a\\\"b"), "\"/tmp/a\\\\\\\"b\"", "sftp batch escapes quotes and backslashes")
 
 expectEqual(
+    PorterSFTPBatch.buildMultiUploadScript(
+        remoteDirectory: "/var/www",
+        items: [
+            PorterSFTPBatch.UploadItem(localAbsolutePath: "/tmp/a.txt", isDirectory: false),
+            PorterSFTPBatch.UploadItem(localAbsolutePath: "/tmp/pkg", isDirectory: true),
+        ]
+    ),
+    """
+    cd "/var/www"
+    put -p "/tmp/a.txt"
+    put -pr "/tmp/pkg"
+
+    """,
+    "multi upload uses one cd and multiple puts"
+)
+
+let probeScript = RemoteShellPath.batchItemExistenceProbeScript(paths: ["~/uploads/a", "/var/www/app"])
+expectEqual(
+    probeScript,
+    """
+    set +e
+    if test -e -- "$HOME"/'uploads/a'; then echo "PORTER_EXISTS 0 1"; else echo "PORTER_EXISTS 0 0"; fi
+    if test -e -- '/var/www/app'; then echo "PORTER_EXISTS 1 1"; else echo "PORTER_EXISTS 1 0"; fi
+    """,
+    "batch existence probe emits indexed markers"
+)
+let probeOutput = """
+PORTER_EXISTS 0 1
+PORTER_EXISTS 1 0
+"""
+let parsedExistence = RemoteShellPath.parseBatchExistenceProbeOutput(probeOutput, count: 2)
+guard parsedExistence.count == 2, parsedExistence[0] == true, parsedExistence[1] == false else {
+    fatalError("batch existence parser maps markers to booleans: \(parsedExistence)")
+}
+
+expectEqual(
     RemotePathCodec.childPath(in: "~/uploads", name: "readme.txt"),
     "~/uploads/readme.txt",
     "child path under home directory"

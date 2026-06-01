@@ -15,7 +15,8 @@ let package = Package(
         .target(name: "PorterCore"),
         .executableTarget(
             name: "PorterApp",
-            dependencies: ["PorterCore"]
+            dependencies: ["PorterCore"],
+            exclude: ["AGENTS.md"]
         ),
         .executableTarget(
             name: "PorterPathValidation",

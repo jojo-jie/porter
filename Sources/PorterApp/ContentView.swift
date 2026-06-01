@@ -10,6 +10,7 @@ struct ContentView: View {
     @EnvironmentObject private var uploadPreferences: UploadPreferencesStore
     @EnvironmentObject private var remoteFileEditCoordinator: RemoteFileEditCoordinator
     @StateObject private var model = AppModel()
+    @State private var sshConfigWatcher = SSHConfigFileWatcher()
     @State private var isFileImporterPresented = false
     @State private var isDropTargeted = false
     @State private var isRemoteBrowserPresented = false
@@ -64,6 +65,10 @@ struct ContentView: View {
         .onAppear {
             model.refreshHosts(using: sshConfigPreferences)
             remoteFileEditCoordinator.pruneSessionsWithMissingLocalFiles()
+            sshConfigWatcher.watch(configURL: sshConfigPreferences.resolvedConfigURL)
+        }
+        .onDisappear {
+            sshConfigWatcher.stop()
         }
         .onReceive(NotificationCenter.default.publisher(for: .porterRemoteEditSyncFailed)) { notification in
             let name = notification.userInfo?["fileName"] as? String ?? "文件"
@@ -99,6 +104,9 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: .porterSSHConfigPathChanged)) { _ in
             performHostsRefresh()
         }
+        .onChange(of: sshConfigPreferences.configPath) { _, _ in
+            sshConfigWatcher.watch(configURL: sshConfigPreferences.resolvedConfigURL)
+        }
         .onChange(of: sidebarSearchText) { _, _ in
             syncSelectedHostWithFilteredHosts()
         }
@@ -108,7 +116,7 @@ struct ContentView: View {
     }
 
     private var canRunMainWorkspaceAction: Bool {
-        !isSettingsPresented && !model.isBusy
+        !isSettingsPresented && !model.isUploading
     }
 
     private var workspaceDetailColumn: some View {
@@ -381,7 +389,11 @@ struct ContentView: View {
 
                 PathField(text: model.pathBinding(for: host), isRemoteBrowserPresented: $isRemoteBrowserPresented)
 
-                DropZone(isTargeted: isDropTargeted, isUploading: model.isUploading)
+                DropZone(
+                    isTargeted: isDropTargeted,
+                    isUploading: model.isUploading,
+                    uploadProgress: model.uploadProgress
+                )
                     .onTapGesture {
                         isFileImporterPresented = true
                     }
@@ -398,7 +410,12 @@ struct ContentView: View {
                 Spacer(minLength: 0)
 
                 if shouldShowStatusRow {
-                    StatusRow(log: model.log, isUploading: model.isUploading)
+                    StatusRow(
+                        log: model.log,
+                        isUploading: model.isUploading,
+                        uploadProgress: model.uploadProgress,
+                        onCancelUpload: model.isUploading ? { model.cancelUpload() } : nil
+                    )
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -440,8 +457,8 @@ struct ContentView: View {
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
-            .disabled(model.isBusy)
-            .porterPointingHandCursor(!model.isBusy)
+            .disabled(model.isUploading)
+            .porterPointingHandCursor(!model.isUploading)
             .keyboardShortcut("u", modifiers: .command)
 
             Button {
@@ -452,8 +469,8 @@ struct ContentView: View {
             }
             .buttonStyle(.bordered)
             .controlSize(.large)
-            .disabled(model.isBusy)
-            .porterPointingHandCursor(!model.isBusy)
+            .disabled(model.isTestingConnection)
+            .porterPointingHandCursor(!model.isTestingConnection)
 
             Button {
                 openSSHTest(host: host)
@@ -463,8 +480,8 @@ struct ContentView: View {
             }
             .buttonStyle(.bordered)
             .controlSize(.large)
-            .disabled(model.isBusy)
-            .porterPointingHandCursor(!model.isBusy)
+            .disabled(model.isUploading)
+            .porterPointingHandCursor(!model.isUploading)
 
             if axis == .horizontal {
                 Spacer(minLength: 0)
