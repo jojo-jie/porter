@@ -293,17 +293,19 @@ struct RemoteDirectoryBrowserSheet: View {
 
     func beginRename(_ entry: RemoteListingEntry) {
         let remotePath = browser.remotePath(for: entry)
-        guard !renamingNames.contains(entry.name),
-              !downloadingNames.contains(entry.name),
-              !deletingNames.contains(entry.name),
-              !remoteFileEditCoordinator.isBusy(host: browser.hostAlias, remotePath: remotePath),
-              !remoteFileEditCoordinator.hasEditSession(host: browser.hostAlias, remotePath: remotePath)
-        else {
-            if remoteFileEditCoordinator.hasEditSession(host: browser.hostAlias, remotePath: remotePath) {
-                footerStatusMessage = "无法重命名：\(entry.name) 正在通过默认应用编辑，请先关闭编辑器。"
-            }
+        if let blockMessage = remoteFileEditCoordinator.remoteMutationBlockMessage(
+            host: browser.hostAlias,
+            remotePath: remotePath,
+            fileName: entry.name
+        ) {
+            footerStatusMessage = blockMessage
             return
         }
+
+        guard !renamingNames.contains(entry.name),
+              !downloadingNames.contains(entry.name),
+              !deletingNames.contains(entry.name)
+        else { return }
 
         renameDraftName = entry.name
         renamePromptErrorText = nil
@@ -419,17 +421,19 @@ struct RemoteDirectoryBrowserSheet: View {
 
     func beginDelete(_ entry: RemoteListingEntry) {
         let remotePath = browser.remotePath(for: entry)
-        guard !deletingNames.contains(entry.name),
-              !downloadingNames.contains(entry.name),
-              !renamingNames.contains(entry.name),
-              !remoteFileEditCoordinator.isBusy(host: browser.hostAlias, remotePath: remotePath),
-              !remoteFileEditCoordinator.hasEditSession(host: browser.hostAlias, remotePath: remotePath)
-        else {
-            if remoteFileEditCoordinator.hasEditSession(host: browser.hostAlias, remotePath: remotePath) {
-                footerStatusMessage = "无法删除：\(entry.name) 正在通过默认应用编辑，请先关闭编辑器。"
-            }
+        if let blockMessage = remoteFileEditCoordinator.remoteMutationBlockMessage(
+            host: browser.hostAlias,
+            remotePath: remotePath,
+            fileName: entry.name
+        ) {
+            footerStatusMessage = blockMessage
             return
         }
+
+        guard !deletingNames.contains(entry.name),
+              !downloadingNames.contains(entry.name),
+              !renamingNames.contains(entry.name)
+        else { return }
         pendingDeleteConfirmation = DeleteConfirmation(entry: entry)
     }
 

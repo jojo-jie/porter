@@ -125,6 +125,31 @@ public enum RemotePathCodec {
         return next
     }
 
+    /// Resolves a typed path against the current browser location.
+    ///
+    /// Absolute paths and home-relative paths replace the current location; other inputs are treated as
+    /// descendants of `base`. Dot segments are normalized so `foo/../bar` behaves like a shell `cd`.
+    public static func resolve(_ raw: String, against base: [String]) -> [String] {
+        let t = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if t.isEmpty { return base }
+        if t == "/" || t == "~" || t == "~/" || t.hasPrefix("/") || t.hasPrefix("~/") {
+            return split(t)
+        }
+
+        var resolved = base.isEmpty ? ["~"] : base
+        for part in t.split(separator: "/").map(String.init).filter({ !$0.isEmpty }) {
+            if part == "." { continue }
+            if part == ".." {
+                if let parent = parent(of: resolved) {
+                    resolved = parent
+                }
+                continue
+            }
+            resolved.append(part)
+        }
+        return resolved
+    }
+
     /// Remote path after uploading `name` into `directory` (e.g. `~/uploads` + `readme.txt`).
     public static func childPath(in directory: String, name: String) -> String {
         join(appendComponent(split(directory), name))

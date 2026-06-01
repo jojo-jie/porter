@@ -9,6 +9,11 @@ final class RemoteDirectoryBrowserModel: ObservableObject {
         let fetchedAt: Date
     }
 
+    private enum ListingParseResult: Sendable {
+        case success(pwd: String, entries: [RemoteListingEntry])
+        case invalidFormat
+    }
+
     private static var listingCache: [String: CachedListing] = [:]
     private static let listingCacheTTL: TimeInterval = 30
 
@@ -81,6 +86,10 @@ final class RemoteDirectoryBrowserModel: ObservableObject {
         }
         guard entry.navigable, entry.isDirectory else { return }
         replacePathAndReload(RemotePathCodec.appendComponent(segments, entry.name))
+    }
+
+    func openPathFromCurrentDirectory(_ rawPath: String) {
+        replacePathAndReload(RemotePathCodec.resolve(rawPath, against: segments))
     }
 
     func goToBreadcrumb(index: Int) {
@@ -169,17 +178,39 @@ final class RemoteDirectoryBrowserModel: ObservableObject {
             return
         }
 
-        let sections = output.components(separatedBy: "\n___PORTER_LS_BEGIN___\n")
-        guard sections.count == 2 else {
+        let parseResult = await Task.detached(priority: .userInitiated) {
+            Self.parseListingOutput(output, segmentsSnapshot: segmentsSnapshot)
+        }.value
+
+        guard requestID == activeListRequestID else { return }
+
+        switch parseResult {
+        case .invalidFormat:
             errorMessage = "无法解析远端目录列表，请改用路径输入。"
             entries = []
             resolvedPWD = ""
-            return
+        case .success(let pwd, let parsed):
+            resolvedPWD = pwd
+            entries = parsed
+            storeListingCache(segmentsSnapshot: segmentsSnapshot, pwd: pwd, entries: parsed)
+        }
+    }
+
+    private func syncHistoryFlags() {
+        canGoBack = !pastSegments.isEmpty
+        canGoForward = !futureSegments.isEmpty
+    }
+
+    nonisolated private static func parseListingOutput(
+        _ output: String,
+        segmentsSnapshot: [String]
+    ) -> ListingParseResult {
+        let sections = output.components(separatedBy: "\n___PORTER_LS_BEGIN___\n")
+        guard sections.count == 2 else {
+            return .invalidFormat
         }
 
         let pwd = sections[0].trimmingCharacters(in: .whitespacesAndNewlines)
-        resolvedPWD = pwd
-
         var parsed = RemoteListingEntry.lsParse(lines: sections[1])
         parsed.sort { lhs, rhs in
             if lhs.isDirectory != rhs.isDirectory {
@@ -191,13 +222,8 @@ final class RemoteDirectoryBrowserModel: ObservableObject {
         if RemotePathCodec.parent(of: segmentsSnapshot) != nil {
             parsed.insert(.parentDirectory, at: 0)
         }
-        entries = parsed
-        storeListingCache(segmentsSnapshot: segmentsSnapshot, pwd: pwd, entries: parsed)
-    }
 
-    private func syncHistoryFlags() {
-        canGoBack = !pastSegments.isEmpty
-        canGoForward = !futureSegments.isEmpty
+        return .success(pwd: pwd, entries: parsed)
     }
 
     private static func sanitizedRemoteShellOutput(_ output: String) -> String {

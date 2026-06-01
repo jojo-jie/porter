@@ -29,7 +29,7 @@ enum RemoteSSH {
     }
 }
 
-struct RemoteListingEntry: Identifiable, Hashable {
+struct RemoteListingEntry: Identifiable, Hashable, Sendable {
     var id: String { name }
 
     /// Synthetic `..` row for hierarchy navigation.
@@ -56,22 +56,29 @@ struct RemoteListingEntry: Identifiable, Hashable {
     /// ISO date `yyyy-MM-dd HH:mm` or raw tail for fallback sorting.
     let sortKey: String
 
+    private static let gnuLongIsoRegex = try? NSRegularExpression(
+        pattern: #"^([dl\-])([rwxsSt\-]{9}[+@\.]?)\s+\S+\s+\S+\s+\S+\s+(\d+)\s+(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2})\s+(.+)$"#
+    )
+
     static func lsParse(lines: String) -> [RemoteListingEntry] {
-        lines.split(separator: "\n", omittingEmptySubsequences: false).compactMap { rawLine -> RemoteListingEntry? in
+        let byteFormatter = RemoteByteCountFormatting()
+        return lines.split(separator: "\n", omittingEmptySubsequences: false).compactMap { rawLine -> RemoteListingEntry? in
             let line = rawLine.trimmingCharacters(in: .whitespaces)
             guard !line.isEmpty else { return nil }
             if line.hasPrefix("total ") { return nil }
 
-            guard let gnu = gnuLongIsoLine(from: line) else {
-                return legacyWhitespaceLine(from: line)
+            guard let gnu = gnuLongIsoLine(from: line, byteFormatter: byteFormatter) else {
+                return legacyWhitespaceLine(from: line, byteFormatter: byteFormatter)
             }
             return gnu
         }
     }
 
-    private static func gnuLongIsoLine(from line: String) -> RemoteListingEntry? {
-        let pattern = #"^([dl\-])([rwxsSt\-]{9}[+@\.]?)\s+\S+\s+\S+\s+\S+\s+(\d+)\s+(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2})\s+(.+)$"#
-        guard let regex = try? NSRegularExpression(pattern: pattern),
+    private static func gnuLongIsoLine(
+        from line: String,
+        byteFormatter: RemoteByteCountFormatting
+    ) -> RemoteListingEntry? {
+        guard let regex = gnuLongIsoRegex,
               let match = regex.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)),
               let modeR = Range(match.range(at: 1), in: line),
               let permR = Range(match.range(at: 2), in: line),
@@ -114,7 +121,7 @@ struct RemoteListingEntry: Identifiable, Hashable {
             name: displayName,
             permissions: perm,
             modifiedDisplay: "\(datePart) \(timePart)",
-            sizeDisplay: isDir ? "—" : RemoteByteCountFormatting.string(forBytes: UInt64(size) ?? 0),
+            sizeDisplay: isDir ? "—" : byteFormatter.string(forBytes: UInt64(size) ?? 0),
             kindLabel: kind,
             fileTypeMarker: typeChar,
             isDirectory: isDir,
@@ -133,7 +140,10 @@ struct RemoteListingEntry: Identifiable, Hashable {
         return (linkName, false, false)
     }
 
-    private static func legacyWhitespaceLine(from line: String) -> RemoteListingEntry? {
+    private static func legacyWhitespaceLine(
+        from line: String,
+        byteFormatter: RemoteByteCountFormatting
+    ) -> RemoteListingEntry? {
         let pieces = line.split(whereSeparator: \.isWhitespace).map(String.init)
         guard pieces.count >= 9 else { return nil }
         let mode = pieces[0]
@@ -153,7 +163,7 @@ struct RemoteListingEntry: Identifiable, Hashable {
             name: name,
             permissions: mode,
             modifiedDisplay: modified,
-            sizeDisplay: isDir ? "—" : RemoteByteCountFormatting.string(forBytes: UInt64(size) ?? 0),
+            sizeDisplay: isDir ? "—" : byteFormatter.string(forBytes: UInt64(size) ?? 0),
             kindLabel: isDir ? "文件夹" : (typeChar == "l" ? "符号链接" : "文件"),
             fileTypeMarker: String(typeChar),
             isDirectory: isDir,
@@ -163,11 +173,16 @@ struct RemoteListingEntry: Identifiable, Hashable {
     }
 }
 
-private enum RemoteByteCountFormatting {
-    static func string(forBytes bytes: UInt64) -> String {
-        let formatter = Foundation.ByteCountFormatter()
+private final class RemoteByteCountFormatting {
+    private let formatter: Foundation.ByteCountFormatter
+
+    init() {
+        formatter = Foundation.ByteCountFormatter()
         formatter.allowedUnits = [.useAll]
         formatter.countStyle = .file
+    }
+
+    func string(forBytes bytes: UInt64) -> String {
         return formatter.string(fromByteCount: Int64(bytes))
     }
 }

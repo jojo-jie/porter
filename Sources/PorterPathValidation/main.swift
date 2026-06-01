@@ -77,6 +77,21 @@ expectEqual(RemotePathCodec.split("~/uploads"), ["~", "uploads"], "home-relative
 expectEqual(RemotePathCodec.split("/var/www/app"), ["/", "var", "www", "app"], "absolute input splits into components")
 expectEqual(RemotePathCodec.join(["~", "two words", "it's"]), "~/two words/it's", "home-relative components join")
 expectEqual(RemotePathCodec.join(["/", "var", "www", "app"]), "/var/www/app", "absolute components join")
+expectEqual(
+    RemotePathCodec.resolve("logs/archive", against: ["~", "uploads"]),
+    ["~", "uploads", "logs", "archive"],
+    "relative typed path resolves under current directory"
+)
+expectEqual(
+    RemotePathCodec.resolve("../shared/./assets", against: ["/", "var", "www", "app"]),
+    ["/", "var", "www", "shared", "assets"],
+    "relative typed path normalizes parent and dot segments"
+)
+expectEqual(
+    RemotePathCodec.resolve("/srv/releases", against: ["~", "uploads"]),
+    ["/", "srv", "releases"],
+    "absolute typed path replaces current directory"
+)
 
 expectEqual(PorterSFTPBatch.batchQuotedPath("/tmp/a"), "\"/tmp/a\"", "sftp batch quotes plain path")
 expectEqual(PorterSFTPBatch.batchQuotedPath("/tmp/a\\\"b"), "\"/tmp/a\\\\\\\"b\"", "sftp batch escapes quotes and backslashes")

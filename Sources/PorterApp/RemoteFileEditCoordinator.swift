@@ -36,6 +36,28 @@ final class RemoteFileEditCoordinator: ObservableObject {
         sessions[sessionKey(host: host, remotePath: remotePath)] != nil
     }
 
+    /// Clears a finished local edit session before a remote mutation such as rename/delete.
+    ///
+    /// Closing the default app does not reliably emit a filesystem event, so clean sessions can otherwise
+    /// remain in memory and block remote operations indefinitely.
+    func remoteMutationBlockMessage(host: String, remotePath: String, fileName: String) -> String? {
+        pruneSessionsWithMissingLocalFiles()
+        let key = sessionKey(host: host, remotePath: remotePath)
+        guard let session = sessions[key] else { return nil }
+
+        if session.isUploading || busySessionKeys.contains(key) {
+            return "无法操作：\(fileName) 正在同步本地编辑，请稍后重试。"
+        }
+
+        if Self.localFileNeedsUpload(session: session) {
+            handleLocalFileChange(sessionKey: key)
+            return "无法操作：\(fileName) 还有本地编辑未同步，请等待同步完成后重试。"
+        }
+
+        endSession(sessionKey: key)
+        return nil
+    }
+
     var hasActiveEditSessions: Bool {
         !sessions.isEmpty
     }

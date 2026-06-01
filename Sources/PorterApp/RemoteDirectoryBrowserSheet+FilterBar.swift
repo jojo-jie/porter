@@ -11,9 +11,12 @@ extension RemoteDirectoryBrowserSheet {
                     .foregroundStyle(.tertiary)
                     .imageScale(.small)
 
-                TextField("筛选当前目录中的文件或文件夹", text: $filterText)
+                TextField("筛选或输入子目录路径", text: $filterText)
                     .textFieldStyle(.plain)
                     .frame(maxWidth: .infinity)
+                    .onSubmit {
+                        submitFilterPath()
+                    }
 
                 if !filterText.isEmpty {
                     Button {
@@ -86,6 +89,15 @@ extension RemoteDirectoryBrowserSheet {
 
     var canMutateCurrentDirectory: Bool {
         !browser.isLoading && browser.errorMessage == nil && !isCreatingNewItem
+    }
+
+    func submitFilterPath() {
+        let typedPath = filterText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !typedPath.isEmpty, !browser.isLoading else { return }
+        withoutAnimation {
+            selectedName = nil
+        }
+        browser.openPathFromCurrentDirectory(typedPath)
     }
 
     @ViewBuilder
