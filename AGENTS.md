@@ -31,6 +31,7 @@
 - dev: `swift run Porter`
 - build: `swift build`
 - test: `swift run PorterPathValidation`
+- validate: `./Scripts/validate.sh`
 
 ### 测试说明
 - 针对本次修改的文件运行最相关的检查。

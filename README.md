@@ -27,6 +27,7 @@ Porter 是 macOS 上的 SwiftUI 小工具：从本机 SSH 配置读取 `Host` al
 swift run Porter                 # 启动应用
 swift build
 swift run PorterPathValidation   # 路径、引号、sftp 批处理等轻量回归
+./Scripts/validate.sh            # 构建 + 当前项目回归验证
 ```
 
 ### 打包 DMG（可选）
@@ -54,7 +55,7 @@ Host prod
 ```text
 Sources/
   PorterApp/              SwiftUI、SSH 解析、远端浏览、上传下载与设置
-  PorterCore/             远端路径、SFTP 批处理、SSH 封装、文件名校验
+  PorterCore/             SSH 配置解析、远端路径、SFTP 批处理、SSH 封装、文件名校验
   PorterPathValidation/   PorterCore 边界断言（无独立 XCTest 目标时的回归入口）
 design-package/           UI 设计语言（DESIGN.md、预览 HTML）
 Scripts/                  图标渲染、DMG 打包等

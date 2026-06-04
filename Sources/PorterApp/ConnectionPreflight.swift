@@ -32,30 +32,16 @@ enum ConnectionPreflight {
     }
 
     private static func runSSHProbe(hostAlias: String) -> (exitCode: Int32, output: String) {
-        let process = Process()
-        let stdoutPipe = Pipe()
-        let stderrPipe = Pipe()
-
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/ssh")
-        process.arguments = [
-            "-o", "BatchMode=yes",
-            "-o", "ConnectTimeout=10",
-            hostAlias,
-            "/bin/true",
-        ]
-        process.standardOutput = stdoutPipe
-        process.standardError = stderrPipe
-
-        do {
-            try process.run()
-            process.waitUntilExit()
-            let out = String(data: stdoutPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-            let err = String(data: stderrPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-            let merged = [out, err].filter { !$0.isEmpty }.joined(separator: "\n")
-            return (process.terminationStatus, merged)
-        } catch {
-            return (127, error.localizedDescription)
-        }
+        let result = PorterSubprocess.run(
+            executable: "/usr/bin/ssh",
+            arguments: [
+                "-o", "BatchMode=yes",
+                "-o", "ConnectTimeout=10",
+                hostAlias,
+                "/bin/true",
+            ]
+        )
+        return (result.exitCode, result.output)
     }
 
     private static func humanReadableProbeOutput(_ output: String, fallback: String) -> String {

@@ -233,4 +233,90 @@ do {
     fatalError("cache size test failed: \(error)")
 }
 
+let sshConfigTempRoot = FileManager.default.temporaryDirectory
+    .appendingPathComponent("porter-ssh-config-test-\(UUID().uuidString)", isDirectory: true)
+do {
+    try FileManager.default.createDirectory(at: sshConfigTempRoot, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: sshConfigTempRoot) }
+
+    let configURL = sshConfigTempRoot.appendingPathComponent("config")
+    let includeDirectory = sshConfigTempRoot.appendingPathComponent("includes", isDirectory: true)
+    try FileManager.default.createDirectory(at: includeDirectory, withIntermediateDirectories: true)
+
+    try """
+    Host app
+      HostName=app.internal
+      User deploy
+      Port 2201
+
+    Include=includes/*.conf
+
+    Host *
+      User wildcard
+
+    Host github
+      HostName github.com
+      User git
+
+    Host !blocked
+      HostName blocked.internal
+    """.write(to: configURL, atomically: true, encoding: .utf8)
+
+    try """
+    Host quoted
+      HostName "host#with-comment-marker"
+      User "deploy user" # real comment
+      Port 2222
+    """.write(to: includeDirectory.appendingPathComponent("quoted.conf"), atomically: true, encoding: .utf8)
+
+    try """
+    Include ../config
+
+    Host nested
+      HostName nested.internal
+    """.write(to: includeDirectory.appendingPathComponent("nested.conf"), atomically: true, encoding: .utf8)
+
+    let hosts = SSHConfigParser.loadHosts(configURL: configURL)
+    expectEqual(hosts.map(\.name), ["app", "nested", "quoted"], "ssh config parser expands includes and filters aliases")
+
+    guard let appHost = hosts.first(where: { $0.name == "app" }) else {
+        fatalError("app host parsed")
+    }
+    expectEqual(appHost.hostName, "app.internal", "ssh config parser reads hostname")
+    expectEqual(appHost.user, "deploy", "ssh config parser reads user")
+    expectEqual(appHost.port, "2201", "ssh config parser reads port")
+
+    guard let quotedHost = hosts.first(where: { $0.name == "quoted" }) else {
+        fatalError("quoted host parsed")
+    }
+    expectEqual(quotedHost.hostName, "host#with-comment-marker", "ssh config parser unquotes host value and preserves quoted hash")
+    expectEqual(quotedHost.user, "deploy user", "ssh config parser unquotes values and strips comments outside quotes")
+    expectEqual(quotedHost.port, "2222", "ssh config parser reads included port")
+} catch {
+    fatalError("ssh config parser test failed: \(error)")
+}
+
+let duplicateConfigTempRoot = FileManager.default.temporaryDirectory
+    .appendingPathComponent("porter-ssh-config-duplicate-test-\(UUID().uuidString)", isDirectory: true)
+do {
+    try FileManager.default.createDirectory(at: duplicateConfigTempRoot, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: duplicateConfigTempRoot) }
+
+    let configURL = duplicateConfigTempRoot.appendingPathComponent("config")
+    try """
+    Host duplicate
+      HostName first.internal
+
+    Host duplicate
+      HostName second.internal
+    """.write(to: configURL, atomically: true, encoding: .utf8)
+
+    let hosts = SSHConfigParser.loadHosts(configURL: configURL)
+    expectEqual(hosts.count, 1, "ssh config parser de-duplicates aliases")
+    expectEqual(hosts.first?.name, "duplicate", "ssh config parser keeps duplicate alias name")
+    expectEqual(hosts.first?.hostName, "first.internal", "ssh config parser keeps first duplicate host")
+} catch {
+    fatalError("ssh config duplicate parser test failed: \(error)")
+}
+
 print("Remote path validation passed")

@@ -25,6 +25,23 @@ public final class PorterSubprocessCancellation: @unchecked Sendable {
     }
 }
 
+private final class PorterPipeReadBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var data = Data()
+
+    func set(_ newData: Data) {
+        lock.lock()
+        data = newData
+        lock.unlock()
+    }
+
+    func get() -> Data {
+        lock.lock()
+        defer { lock.unlock() }
+        return data
+    }
+}
+
 public enum PorterSubprocess {
     public struct Result: Sendable {
         public let exitCode: Int32
@@ -59,18 +76,34 @@ public enum PorterSubprocess {
 
         do {
             try process.run()
+            let stdoutRead = readPipeAsync(stdoutPipe)
+            let stderrRead = readPipeAsync(stderrPipe)
             if let stdin, let stdinPipe, let data = stdin.data(using: .utf8) {
                 stdinPipe.fileHandleForWriting.write(data)
                 stdinPipe.fileHandleForWriting.closeFile()
             }
             process.waitUntilExit()
-            let out = String(data: stdoutPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-            let err = String(data: stderrPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+            let out = String(data: stdoutRead(), encoding: .utf8) ?? ""
+            let err = String(data: stderrRead(), encoding: .utf8) ?? ""
             let merged = [out, err].filter { !$0.isEmpty }.joined(separator: "\n")
             let wasCancelled = cancellation?.isCancelled == true
             return Result(exitCode: process.terminationStatus, output: merged, wasCancelled: wasCancelled)
         } catch {
             return Result(exitCode: 127, output: error.localizedDescription, wasCancelled: cancellation?.isCancelled == true)
+        }
+    }
+
+    private static func readPipeAsync(_ pipe: Pipe) -> @Sendable () -> Data {
+        let group = DispatchGroup()
+        let box = PorterPipeReadBox()
+        group.enter()
+        DispatchQueue.global(qos: .utility).async {
+            box.set(pipe.fileHandleForReading.readDataToEndOfFile())
+            group.leave()
+        }
+        return {
+            group.wait()
+            return box.get()
         }
     }
 }

@@ -1,8 +1,13 @@
 import Darwin
 import Foundation
 
-enum SSHConfigParser {
-    static func loadHosts(configURL: URL? = nil) -> [SSHHost] {
+public enum SSHConfigParser {
+    private struct Directive {
+        let keyword: String
+        let arguments: [String]
+    }
+
+    public static func loadHosts(configURL: URL? = nil) -> [SSHHost] {
         let url = configURL ?? SSHConfigPathResolver.resolvedFileURL(forConfigPath: SSHConfigPathResolver.defaultConfigPath)
         var visited = Set<URL>()
         let lines = readLines(from: url, visited: &visited)
@@ -21,11 +26,12 @@ enum SSHConfigParser {
         var result: [String] = []
 
         for rawLine in content.components(separatedBy: .newlines) {
-            let line = rawLine.trimmingCharacters(in: .whitespaces)
-            let parts = splitDirective(line)
-            if parts.keyword.lowercased() == "include", let value = parts.value {
-                for includeURL in expandInclude(value, relativeTo: baseDirectory) {
-                    result.append(contentsOf: readLines(from: includeURL, visited: &visited))
+            let directive = parseDirective(rawLine)
+            if directive?.keyword.lowercased() == "include", let patterns = directive?.arguments {
+                for pattern in patterns {
+                    for includeURL in expandInclude(pattern, relativeTo: baseDirectory) {
+                        result.append(contentsOf: readLines(from: includeURL, visited: &visited))
+                    }
                 }
             } else {
                 result.append(rawLine)
@@ -33,6 +39,64 @@ enum SSHConfigParser {
         }
 
         return result
+    }
+
+    private static func parseDirective(_ line: String) -> Directive? {
+        let tokens = tokenize(line)
+        guard let keyword = tokens.first else { return nil }
+        let arguments = Array(tokens.dropFirst())
+        guard !arguments.isEmpty else { return nil }
+        return Directive(keyword: keyword, arguments: arguments)
+    }
+
+    private static func tokenize(_ line: String) -> [String] {
+        var tokens: [String] = []
+        var current = ""
+        var tokenStarted = false
+        var isQuoted = false
+        var escaped = false
+
+        func flush() {
+            guard tokenStarted else { return }
+            tokens.append(current)
+            current = ""
+            tokenStarted = false
+        }
+
+        for character in line {
+            if escaped {
+                current.append(character)
+                tokenStarted = true
+                escaped = false
+                continue
+            }
+            if character == "\\" {
+                escaped = true
+                tokenStarted = true
+                continue
+            }
+            if character == "\"" {
+                isQuoted.toggle()
+                tokenStarted = true
+                continue
+            }
+            if character == "#", !isQuoted {
+                break
+            }
+            if !isQuoted, character.isWhitespace || character == "=" {
+                flush()
+                continue
+            }
+
+            current.append(character)
+            tokenStarted = true
+        }
+
+        if escaped {
+            current.append("\\")
+        }
+        flush()
+        return tokens
     }
 
     private static func parse(lines: [String]) -> [SSHHost] {
@@ -55,19 +119,15 @@ enum SSHConfigParser {
         }
 
         for rawLine in lines {
-            let withoutComment = stripComment(rawLine).trimmingCharacters(in: .whitespaces)
-            guard !withoutComment.isEmpty else { continue }
-
-            let directive = splitDirective(withoutComment)
+            guard let directive = parseDirective(rawLine) else { continue }
             let keyword = directive.keyword.lowercased()
-            guard let value = directive.value else { continue }
 
             if keyword == "host" {
                 flush()
-                activeNames = value.components(separatedBy: .whitespaces).filter { !$0.isEmpty }
+                activeNames = directive.arguments
                 activeValues = [:]
             } else if !activeNames.isEmpty, ["hostname", "user", "port"].contains(keyword) {
-                activeValues[keyword] = value
+                activeValues[keyword] = directive.arguments.joined(separator: " ")
             }
         }
 
@@ -96,48 +156,6 @@ enum SSHConfigParser {
         if matchesCodeHostingDomain(host.name) { return false }
         if let hn = host.hostName, matchesCodeHostingDomain(hn) { return false }
         return true
-    }
-
-    private static func stripComment(_ line: String) -> String {
-        var isQuoted = false
-        var escaped = false
-        var output = ""
-
-        for character in line {
-            if escaped {
-                output.append(character)
-                escaped = false
-                continue
-            }
-            if character == "\\" {
-                output.append(character)
-                escaped = true
-                continue
-            }
-            if character == "\"" {
-                output.append(character)
-                isQuoted.toggle()
-                continue
-            }
-            if character == "#", !isQuoted {
-                break
-            }
-            output.append(character)
-        }
-
-        return output
-    }
-
-    private static func splitDirective(_ line: String) -> (keyword: String, value: String?) {
-        let trimmed = stripComment(line).trimmingCharacters(in: .whitespaces)
-        guard let separator = trimmed.firstIndex(where: { $0.isWhitespace || $0 == "=" }) else {
-            return (trimmed, nil)
-        }
-        let keyword = String(trimmed[..<separator])
-        let valueStart = trimmed.index(after: separator)
-        let value = String(trimmed[valueStart...])
-            .trimmingCharacters(in: CharacterSet(charactersIn: " =\t"))
-        return (keyword, value.isEmpty ? nil : value)
     }
 
     private static func isConcreteHostAlias(_ name: String) -> Bool {

@@ -1,4 +1,5 @@
 import AppKit
+import PorterCore
 import SwiftUI
 
 struct HostSidebarRow: View {

@@ -16,6 +16,7 @@ final class RemoteDirectoryBrowserModel: ObservableObject {
 
     private static var listingCache: [String: CachedListing] = [:]
     private static let listingCacheTTL: TimeInterval = 30
+    private static let listingCacheLimit = 100
 
     let hostAlias: String
 
@@ -149,6 +150,19 @@ final class RemoteDirectoryBrowserModel: ObservableObject {
             entries: entries,
             fetchedAt: Date()
         )
+        Self.pruneListingCacheIfNeeded()
+    }
+
+    private static func pruneListingCacheIfNeeded() {
+        guard listingCache.count > listingCacheLimit else { return }
+        let overflow = listingCache.count - listingCacheLimit
+        let staleKeys = listingCache
+            .sorted { $0.value.fetchedAt < $1.value.fetchedAt }
+            .prefix(overflow)
+            .map(\.key)
+        for key in staleKeys {
+            listingCache.removeValue(forKey: key)
+        }
     }
 
     private func performListFetch(requestID: UInt64, segmentsSnapshot: [String]) async {
